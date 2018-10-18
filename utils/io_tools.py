@@ -57,7 +57,7 @@ class read_dataset(object):
 
         # It's necessary to repeat our data for all epochs
         # 此时dataset中的一个元素是(image_resized_batch, label_batch)
-        dataset = dataset.repeat().batch(self.batch_size)
+        dataset = dataset.repeat().batch(self.batch_size).prefetch(1)
         return dataset
 
     def load_filenames(self,data_txt_file,mode):

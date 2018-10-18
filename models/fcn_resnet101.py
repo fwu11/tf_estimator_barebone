@@ -216,7 +216,7 @@ def model_fn(features, labels, mode, params):
     tf.summary.scalar('cross_entropy', loss)    
     
     # evaluation metric
-    miou, update_op = mIOU(logits,labels,classes=params["num_classes"])
+    miou, update_op = mIOU(predictions,labels,classes=params["num_classes"])
 
 
     # configure training

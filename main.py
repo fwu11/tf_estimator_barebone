@@ -16,9 +16,17 @@ from utils.loss import *
 
 
 def main(argv=None):
+    '''
+    #get PASCAL VOC 2012 data for the first time
+    wget http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar
+    tar -xf VOCtrainval_11-May-2012.tar
+    mv VOCdevkit dataset/
+    print('finish getting data')
+    '''
+
     #args, _ = parser.parse_known_args()
     hparams = parser.parse_args(argv[1:])   
-    dataset_root = 'dataset'
+    dataset_root = 'dataset/VOCdevkit/VOC2012'
     img_dir = os.path.join(dataset_root, "PascalVOC/JPEGImages")
     label_dir = os.path.join(dataset_root,"combined_annotations")
     train_file_path = os.path.join(dataset_root,"combined_imageset_train.txt")
@@ -104,10 +112,10 @@ if __name__ == "__main__":
         '--train-epoch', type=int, default=50,
         help='Training epoch.')
     parser.add_argument(
-        '--train-batch-size', type=int, default=2,
+        '--train-batch-size', type=int, default=4,
         help='Batch size to be used.')
     parser.add_argument(
-        '--eval-batch-size', type=int, default=2,
+        '--eval-batch-size', type=int, default=4,
         help='Batch size to be used.')
     parser.add_argument(
         '--base-size', type=int, default=280,
