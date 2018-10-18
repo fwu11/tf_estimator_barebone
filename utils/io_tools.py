@@ -42,11 +42,11 @@ class read_dataset(object):
     def get_input_fn(self,threads=5):
         
         # Create a dataset from the filenames and labels
-        # 此时dataset中的一个元素是(filename, label)
+        # (filename, label)
         dataset = tf.data.Dataset.from_tensor_slices((self.x_filenames, self.y_filenames))
 
         # Map our preprocessing function to every element in our dataset, taking advantage of multithreading
-        # 此时dataset中的一个元素是(image_resized, label)
+        # (image_resized, label)
         if self.mode == "train":
             dataset = dataset.map(lambda x_filenames,y_filenames: tuple(tf.py_func(self._transform,[x_filenames,y_filenames],[tf.uint8,tf.uint8])), num_parallel_calls=threads)
             dataset = dataset.map(self._standardize, num_parallel_calls=threads)
@@ -56,7 +56,7 @@ class read_dataset(object):
             dataset = dataset.map(self._standardize, num_parallel_calls=threads)
 
         # It's necessary to repeat our data for all epochs
-        # 此时dataset中的一个元素是(image_resized_batch, label_batch)
+        # (image_resized_batch, label_batch)
         dataset = dataset.repeat().batch(self.batch_size).prefetch(1)
         return dataset
 
