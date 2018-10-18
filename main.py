@@ -27,10 +27,10 @@ def main(argv=None):
     #args, _ = parser.parse_known_args()
     hparams = parser.parse_args(argv[1:])   
     dataset_root = 'dataset/VOCdevkit/VOC2012'
-    img_dir = os.path.join(dataset_root, "PascalVOC/JPEGImages")
-    label_dir = os.path.join(dataset_root,"combined_annotations")
-    train_file_path = os.path.join(dataset_root,"combined_imageset_train.txt")
-    val_file_path = os.path.join(dataset_root,"combined_imageset_val.txt")
+    img_dir = os.path.join(dataset_root, "JPEGImages")
+    label_dir = os.path.join(dataset_root,"SegmentationClass")
+    train_file_path = os.path.join(dataset_root,"ImageSets/train.txt")
+    val_file_path = os.path.join(dataset_root,"ImageSets/val.txt")
 
 
     # create training dataset object
