@@ -10,7 +10,6 @@
 import os
 import math
 import random
-import functools
 import numpy as np
 import tensorflow as tf
 from PIL import Image, ImageOps, ImageFilter
