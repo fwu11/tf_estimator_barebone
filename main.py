@@ -16,10 +16,12 @@ from utils.loss import *
 
 
 def main(argv=None):
-    REMOTE_URL = 'https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz'
+    '''
+    REMOTE_URL = 'http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar'
     LOCAL_DIR = os.path.join('data/cifar10/')
-    ARCHIVE_NAME = 'cifar-10-python.tar.gz'
+    ARCHIVE_NAME = 'VOCtrainval_11-May-2012.tar'
     DATA_DIR = 'cifar-10-batches-py/'
+    '''
     '''
     #get PASCAL VOC 2012 data for the first time
     wget http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar
