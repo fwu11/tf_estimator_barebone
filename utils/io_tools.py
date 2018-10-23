@@ -117,8 +117,8 @@ class read_dataset(object):
         # ??? maybe need the mask to be [height,width,channel]
         # final transform
         img = np.asarray(img)
-        mask = img_to_array(mask).astype(np.uint8)
-        mask = np.squeeze(mask,axis=2)
+        mask = np.array(mask).astype(np.uint8)
+        #mask = np.squeeze(mask,axis=2)
         mask[np.where(mask == self.ignore_label)] = self.classes
         mask = mask[...,None]
 
@@ -150,8 +150,8 @@ class read_dataset(object):
 
         # final transform
         img = np.asarray(img)
-        mask = img_to_array(mask).astype(np.uint8)
-        mask = np.squeeze(mask,axis=2)
+        mask = np.array(mask).astype(np.uint8)
+        #mask = np.squeeze(mask,axis=2)
         mask[np.where(mask == self.ignore_label)] = self.classes
         mask = mask[...,None]
 

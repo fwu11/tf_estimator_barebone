@@ -24,13 +24,12 @@ def main(argv=None):
     print('finish getting data')
     '''
 
-    #args, _ = parser.parse_known_args()
     hparams = parser.parse_args(argv[1:])   
     dataset_root = 'dataset/VOCdevkit/VOC2012'
     img_dir = os.path.join(dataset_root, "JPEGImages")
     label_dir = os.path.join(dataset_root,"SegmentationClass")
-    train_file_path = os.path.join(dataset_root,"ImageSets/train.txt")
-    val_file_path = os.path.join(dataset_root,"ImageSets/val.txt")
+    train_file_path = os.path.join(dataset_root,"ImageSets/Segmentation/train.txt")
+    val_file_path = os.path.join(dataset_root,"ImageSets/Segmentation/val.txt")
 
 
     # create training dataset object
@@ -124,10 +123,10 @@ if __name__ == "__main__":
         '--crop-size', type=int, default=240,
         help='Crop size after image preprocessing.')
     parser.add_argument(
-        '--eval-base-size', type=int, default=520,
+        '--eval-base-size', type=int, default=280,
         help='Base size to be used.')
     parser.add_argument(
-        '--eval-crop-size', type=int, default=480,
+        '--eval-crop-size', type=int, default=240,
         help='Crop size after image preprocessing.')
     parser.add_argument(
         '--num-classes', type=int, default=21,
