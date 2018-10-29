@@ -164,30 +164,30 @@ def model_fn(features, labels, mode, params):
         conv_1 = tf.nn.relu(features = conv_1, name = 'relu9')
         conv_1 = layers.max_pooling2d (inputs = conv_1, pool_size = (3, 3), strides=(2, 2), padding='same', name='pool10')
 
-    # stage 1
-    with tf.variable_scope('stage1'):
+    # block 1
+    with tf.variable_scope('block1'):
         layer_1 = conv_block(conv_1, [64, 64, 256], stride=(1, 1),is_train = train)
         for i in range(1,3):
             with tf.variable_scope('layer{}'.format(i)):
                 layer_1 = identity_block(layer_1, [64, 64, 256], is_train = train)
 
 
-    # stage 2
-    with tf.variable_scope('stage2'):
+    # block 2
+    with tf.variable_scope('block2'):
         layer_2 = conv_block(layer_1, [128, 128, 512], stride=(2, 2),is_train = train)
         for i in range(1,4):
             with tf.variable_scope('layer{}'.format(i)):
                 layer_2 = identity_block(layer_2, [128, 128, 512], is_train = train)
 
-    # stage 3
-    with tf.variable_scope('stage3'):
+    # block 3
+    with tf.variable_scope('block3'):
         layer_3 = dilated_conv_block(layer_2, [256, 256, 1024], dilation = (1,1),is_train = train)
         for i in range(1,23):
             with tf.variable_scope('layer{}'.format(i)):
                 layer_3 = dilated_identity_block(layer_3, [256, 256, 1024], dilation = (2,2),is_train = train)
 
-    # stage 4
-    with tf.variable_scope('stage4'):
+    # block 4
+    with tf.variable_scope('block4'):
         layer_4 = dilated_conv_block(layer_3, [512, 512, 2048], dilation = (2,2),is_train = train)
         for i in range(1,3):
             with tf.variable_scope('layer{}'.format(i)):
@@ -213,7 +213,7 @@ def model_fn(features, labels, mode, params):
     loss = loss1 + 0.5 * loss2
 
     # make loss available to TensorBoard in both TRAIN and EVAL modes
-    tf.summary.scalar('cross_entropy', loss)    
+    #tf.summary.scalar('cross_entropy', loss)    
     
     # evaluation metric
     miou, update_op = mIOU(predictions,labels,classes=params["num_classes"])
