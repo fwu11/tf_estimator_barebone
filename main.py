@@ -117,13 +117,13 @@ if __name__ == "__main__":
         '--job-dir', type=str, default='./models/4gpus',
         help='Output directory for model and training stats.')
     parser.add_argument(
-        '--train-epoch', type=int, default=50,
+        '--train-epoch', type=int, default=100,
         help='Training epoch.')
     parser.add_argument(
-        '--train-batch-size', type=int, default=4,
+        '--train-batch-size', type=int, default=8,
         help='Batch size to be used.')
     parser.add_argument(
-        '--eval-batch-size', type=int, default=4,
+        '--eval-batch-size', type=int, default=8,
         help='Batch size to be used.')
     parser.add_argument(
         '--base-size', type=int, default=280,
