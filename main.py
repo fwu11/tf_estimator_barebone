@@ -69,7 +69,7 @@ def main(argv=None):
             tf.OptimizerOptions.ON_1)
     '''
 
-	strategy = tf.contrib.distribute.MirroredStrategy（num_gpus = hparams.num_gpus)
+    strategy = tf.contrib.distribute.MirroredStrategy(num_gpus = hparams.num_gpus)
     run_config = tf.estimator.RunConfig(
         model_dir=hparams.job_dir,
         tf_random_seed=hparams.random_seed,
