@@ -68,10 +68,13 @@ def main(argv=None):
         session_config.graph_options.optimizer_options.global_jit_level = (
             tf.OptimizerOptions.ON_1)
     '''
+
+	strategy = tf.contrib.distribute.MirroredStrategy（num_gpus = hparams.num_gpus)
     run_config = tf.estimator.RunConfig(
         model_dir=hparams.job_dir,
         tf_random_seed=hparams.random_seed,
         save_checkpoints_steps=hparams.save_checkpoints_steps,
+        train_distribute = strategy,
         #session_config=session_config,
     )   
 
@@ -111,7 +114,7 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job-dir', type=str, default='./models/fcn',
+        '--job-dir', type=str, default='./models/4gpus',
         help='Output directory for model and training stats.')
     parser.add_argument(
         '--train-epoch', type=int, default=50,
@@ -149,6 +152,11 @@ if __name__ == "__main__":
         '--random-seed',
         help='Random seed for TensorFlow',
         default=None,
+        type=int)
+    parser.add_argument(
+        '--num-gpus',
+        help='Number of GPUs for this task',
+        default=4,
         type=int)
     # Performance tuning parameters
     parser.add_argument(
