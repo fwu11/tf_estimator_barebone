@@ -11,9 +11,10 @@ import os
 import numpy as np
 import math
 from utils.io_tools import read_dataset
-from models.fcn_resnet101 import model_fn
+from models.deeplab_resnet101 import model_fn
 from utils.loss import *
-
+import warnings
+warnings.filterwarnings('ignore')
 
 def main(argv=None):
     '''
@@ -42,7 +43,7 @@ def main(argv=None):
     train_ds = read_dataset(img_dir,
                             label_dir,
                             train_file_path, 
-                            hparams.train_batch_size, 
+                            hparams.batch_size, 
                             "train",
                             hparams.base_size,
                             hparams.crop_size, 
@@ -53,7 +54,7 @@ def main(argv=None):
     eval_ds = read_dataset(img_dir,
                             label_dir,
                             val_file_path, 
-                            hparams.eval_batch_size, 
+                            hparams.batch_size, 
                             "eval",
                             hparams.eval_base_size,
                             hparams.eval_crop_size, 
@@ -69,7 +70,13 @@ def main(argv=None):
             tf.OptimizerOptions.ON_1)
     '''
 
-    strategy = tf.contrib.distribute.MirroredStrategy(num_gpus = hparams.num_gpus)
+    if hparams.num_gpus == 0:
+        strategy = tf.contrib.distribute.OneDeviceStrategy('device:CPU:0')
+    elif hparams.num_gpus == 1:
+        strategy = tf.contrib.distribute.OneDeviceStrategy('device:GPU:0')
+    else:
+        strategy = tf.contrib.distribute.MirroredStrategy(num_gpus = hparams.num_gpus)
+    
     run_config = tf.estimator.RunConfig(
         model_dir=hparams.job_dir,
         tf_random_seed=hparams.random_seed,
@@ -80,7 +87,13 @@ def main(argv=None):
 
     num_train_examples = train_ds.num_examples
 
-    train_steps_per_epoch = math.ceil(num_train_examples / hparams.train_batch_size)
+    train_steps_per_epoch = math.ceil(num_train_examples / hparams.batch_size)
+    
+    ws = None
+    if hparams.warm_start:
+        ws = tf.estimator.WarmStartSettings(ckpt_to_initialize_from="./models/resnet_v1_101.ckpt",
+                                            vars_to_warm_start=".*resnet_v1_101.*")
+
     # build an estimator
     estimator = tf.estimator.Estimator(
         model_fn = model_fn,
@@ -91,7 +104,8 @@ def main(argv=None):
           'train_epoch': hparams.train_epoch,
           'crop_size': hparams.crop_size,
           'num_classes':hparams.num_classes,
-        })
+        },
+        warm_start_from=ws)
 
     
 
@@ -101,7 +115,7 @@ def main(argv=None):
     )
 
     num_eval_examples = eval_ds.num_examples
-    eval_steps_per_epoch = math.ceil(num_eval_examples / hparams.eval_batch_size)
+    eval_steps_per_epoch = math.ceil(num_eval_examples / hparams.batch_size)
 
     eval_spec = tf.estimator.EvalSpec(
         input_fn = lambda: eval_ds.get_input_fn(),
@@ -114,16 +128,13 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job-dir', type=str, default='./models/4gpus',
+        '--job-dir', type=str, default='./models/deeplab_pretrain',
         help='Output directory for model and training stats.')
     parser.add_argument(
-        '--train-epoch', type=int, default=100,
+        '--train-epoch', type=int, default=200,
         help='Training epoch.')
     parser.add_argument(
-        '--train-batch-size', type=int, default=8,
-        help='Batch size to be used.')
-    parser.add_argument(
-        '--eval-batch-size', type=int, default=8,
+        '--batch-size', type=int, default=8,
         help='Batch size to be used.')
     parser.add_argument(
         '--base-size', type=int, default=280,
@@ -156,8 +167,15 @@ if __name__ == "__main__":
     parser.add_argument(
         '--num-gpus',
         help='Number of GPUs for this task',
-        default=4,
+        default=1,
         type=int)
+    # load pretrained model or not
+    parser.add_argument(
+        '--warm-start',
+        help='Load pretrained model',
+        default= True,
+        type = bool)
+
     # Performance tuning parameters
     parser.add_argument(
         '--allow-growth',
