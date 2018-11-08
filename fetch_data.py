@@ -14,6 +14,7 @@ rm -r SegmentationClassAug.zip
 # down load trainaug.txt
 wget https://gist.githubusercontent.com/sun11/2dbda6b31acc7c6292d14a872d0c90b7/raw/5f5a5270089239ef2f6b65b1cc55208355b5acca/trainaug.txt
 
+
 # original PASCAL VOC 2012 
 wget http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar # 2 GB 
 tar -xvf VOCtrainval_11-May-2012.tar 

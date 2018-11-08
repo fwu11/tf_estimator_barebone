@@ -1,6 +1,6 @@
 # implement FCN in tensorflow/keras
 # This implementation follows the FCN-resnet101
-# Train on the 8,498 images of SBD train
+# 
 # validate on the non-interecting set on PASCAL VOC 2012
 # test on Pascal VOC 2012
 # fwu11
@@ -17,25 +17,14 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def main(argv=None):
-    '''
-    REMOTE_URL = 'http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar'
-    LOCAL_DIR = os.path.join('data/cifar10/')
-    ARCHIVE_NAME = 'VOCtrainval_11-May-2012.tar'
-    DATA_DIR = 'cifar-10-batches-py/'
-    '''
-    '''
-    #get PASCAL VOC 2012 data for the first time
-    wget http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar
-    tar -xf VOCtrainval_11-May-2012.tar
-    mv VOCdevkit dataset/
-    print('finish getting data')
-    '''
 
     hparams = parser.parse_args(argv[1:])   
     dataset_root = 'dataset/VOCdevkit/VOC2012'
+    label_root = 'dataset'
     img_dir = os.path.join(dataset_root, "JPEGImages")
-    label_dir = os.path.join(dataset_root,"SegmentationClass")
-    train_file_path = os.path.join(dataset_root,"ImageSets/Segmentation/train.txt")
+    label_dir = os.path.join(label_root,"SegmentationClassAug")
+    #train_file_path = os.path.join(dataset_root,"ImageSets/Segmentation/train.txt")
+    train_file_path = os.path.join(label_root,"trainaug.txt")
     val_file_path = os.path.join(dataset_root,"ImageSets/Segmentation/val.txt")
 
 
@@ -92,7 +81,7 @@ def main(argv=None):
     ws = None
     if hparams.warm_start:
         ws = tf.estimator.WarmStartSettings(ckpt_to_initialize_from="./models/resnet_v1_101.ckpt",
-                                            vars_to_warm_start=".*resnet_v1_101.*")
+                                            vars_to_warm_start="resnet.*")
 
     # build an estimator
     estimator = tf.estimator.Estimator(
@@ -128,10 +117,10 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job-dir', type=str, default='./models/deeplab_pretrain',
+        '--job-dir', type=str, default='./models/new',
         help='Output directory for model and training stats.')
     parser.add_argument(
-        '--train-epoch', type=int, default=200,
+        '--train-epoch', type=int, default=100,
         help='Training epoch.')
     parser.add_argument(
         '--batch-size', type=int, default=8,
@@ -188,4 +177,5 @@ if __name__ == "__main__":
         default=False,
         type=bool)
 
+    tf.logging.set_verbosity("INFO")
     tf.app.run()
