@@ -51,14 +51,6 @@ def main(argv=None):
                             hparams.num_classes)
     
 
-    #session_config = tf.ConfigProto()
-    '''
-    session_config.gpu_options.allow_growth = args.allow_growth
-    if args.xla:
-        session_config.graph_options.optimizer_options.global_jit_level = (
-            tf.OptimizerOptions.ON_1)
-    '''
-
     if hparams.num_gpus == 0:
         strategy = tf.contrib.distribute.OneDeviceStrategy('device:CPU:0')
     elif hparams.num_gpus == 1:
@@ -120,7 +112,7 @@ if __name__ == "__main__":
         '--job-dir', type=str, default='./models/new',
         help='Output directory for model and training stats.')
     parser.add_argument(
-        '--train-epoch', type=int, default=100,
+        '--train-epoch', type=int, default=150,
         help='Training epoch.')
     parser.add_argument(
         '--batch-size', type=int, default=8,
