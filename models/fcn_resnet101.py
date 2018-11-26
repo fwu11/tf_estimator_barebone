@@ -1,4 +1,3 @@
-import numpy as np
 import tensorflow as tf
 from tensorflow import layers
 from utils.loss import *
@@ -222,7 +221,7 @@ def model_fn(features, labels, mode, params):
     # configure training
     if mode == tf.estimator.ModeKeys.TRAIN:
         # learning rate scheduler
-        global_step = tf.train.get_global_step()
+        global_step = tf.train.get_or_create_global_step()
         starter_learning_rate = 0.001
         end_learning_rate = 0
         decay_steps = params["train_epoch"] * params["num_training_examples"]

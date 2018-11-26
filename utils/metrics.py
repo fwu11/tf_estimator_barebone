@@ -21,7 +21,7 @@ def mIOU(raw_output,label,classes,image_batch):
     # predictions
     raw_output = tf.image.resize_bilinear(raw_output, tf.shape(image_batch)[1:3,])
     raw_output = tf.argmax(raw_output, axis=3)
-    pred = tf.expand_dims(raw_output, dim=3)
+    pred = tf.expand_dims(raw_output, axis=3)
     pred = tf.reshape(pred, [-1,])
     # labels
     gt = tf.reshape(label, [-1,])
