@@ -334,23 +334,6 @@ def deeplab_v3(inputs, args, is_training):
             net = tf.image.resize_bilinear(net, size)
             return net
 
-def prepare_label(input_batch, new_size, num_classes, one_hot=True):
-    """Resize masks and perform one-hot encoding.
-    Args:
-      input_batch: input tensor of shape [batch_size H W 1].
-      new_size: a tensor with new height and width.
-      num_classes: number of classes to predict (including background).
-      one_hot: whether perform one-hot encoding.
-    Returns:
-      Outputs a tensor of shape [batch_size h w 21]
-      with last dimension comprised of 0's and 1's only.
-    """
-    with tf.name_scope('label_encode'):
-        input_batch = tf.squeeze(input_batch, squeeze_dims=[3]) # reducing the channel dimension.
-        if one_hot:
-            input_batch = tf.one_hot(input_batch, depth=num_classes)
-    return input_batch
-
 def model_fn(features, labels, mode, params):
     ''' Model function'''
 
@@ -390,17 +373,6 @@ def model_fn(features, labels, mode, params):
         # piecewise learning rate scheduler
         global_step = tf.train.get_or_create_global_step()
         learning_rate = tf.train.piecewise_constant(global_step, params.learning_rate[0], params.learning_rate[1])
-
-        # learning rate scheduler
-        '''
-        global_step = tf.train.get_or_create_global_step()
-        starter_learning_rate = params.starting_learning_rate
-        end_learning_rate = 0.0001
-        decay_steps = params.train_steps
-        learning_rate = tf.train.polynomial_decay(starter_learning_rate, global_step,
-                                            decay_steps, end_learning_rate,
-                                            power=0.9)
-        '''
 
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
