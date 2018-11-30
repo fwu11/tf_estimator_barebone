@@ -4,6 +4,20 @@ from utils.metrics import *
 import warnings
 warnings.filterwarnings('ignore')
 
+# trainble in BN set to false??
+
+def update_argparser(parser):
+    parser.set_defaults(
+        train_steps=90000,
+        learning_rate=((30000, 60000), (0.001, 0.0001, 0.00001)),
+        save_checkpoints_steps=5000,
+        crop_size = 321,
+        base_size = 340,
+        eval_base_size = 340,
+        eval_crop_size = 321,
+        batch_size = 8,
+    )
+
 """
 This script defines the segmentation network.
 The encoding part is a pre-trained ResNet. This script supports several settings (you need to specify in main.py):
@@ -158,7 +172,7 @@ class ResNet_segmentation(object):
         s = [1, stride, stride, 1]
         return tf.nn.max_pool(x, k, s, padding='SAME', name=name)
         
-    def _batch_norm(self, x, name, is_training, activation_fn, trainable=False):
+    def _batch_norm(self, x, name, is_training, activation_fn, trainable=True):
         # For a small batch size, it is better to keep 
         # the statistics of the BN layers (running means and variances) frozen, 
         # and to not update the values provided by the pre-trained model by setting is_training=False.
@@ -195,10 +209,10 @@ def model_fn(features, labels, mode, params):
     else:
         train = False
     
-    img_input = tf.reshape(features, [-1, params["crop_size"], params["crop_size"], 3])
+    img_input = tf.reshape(features, [-1, params.crop_size, params.crop_size, 3])
 
     # Create network
-    net = ResNet_segmentation(img_input, params["num_classes"], train, 'res101')
+    net = ResNet_segmentation(img_input, params.num_classes, train, 'res101')
     # Variables that load from pre-trained model.
     restore_var = [v for v in tf.global_variables() if 'resnet_v1' in v.name]
     # Trainable Variables
@@ -245,11 +259,12 @@ def model_fn(features, labels, mode, params):
 
 
     # evaluation metric
-    miou, update_op = mIOU(raw_output,labels,params["num_classes"],img_input)
+    miou, update_op = mIOU(raw_output,labels,params.num_classes,img_input)
 
 
     # configure training
     if mode == tf.estimator.ModeKeys.TRAIN:
+        '''
         # learning rate scheduler
         global_step = tf.train.get_or_create_global_step()
         starter_learning_rate = 5e-4
@@ -259,6 +274,10 @@ def model_fn(features, labels, mode, params):
         learning_rate = tf.train.polynomial_decay(starter_learning_rate, global_step,
                                             decay_steps, end_learning_rate,
                                             power=0.9)
+        '''
+        # piecewise learning rate scheduler
+        global_step = tf.train.get_or_create_global_step()
+        learning_rate = tf.train.piecewise_constant(global_step, params.learning_rate[0], params.learning_rate[1])
 
         # We have several optimizers here in order to handle the different lr_mult
         # which is a kind of parameters in Caffe. This controls the actual lr for each
@@ -278,9 +297,9 @@ def model_fn(features, labels, mode, params):
         train_op_fc_w = opt_decoder_w.apply_gradients(zip(grads_decoder_w, decoder_w_trainable), global_step=tf.train.get_global_step())
         train_op_fc_b = opt_decoder_b.apply_gradients(zip(grads_decoder_b, decoder_b_trainable), global_step=tf.train.get_global_step())
         # Finally, get the train_op!
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) # for collecting moving_mean and moving_variance
-        with tf.control_dependencies(update_ops):
-            train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b)
+        #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) # for collecting moving_mean and moving_variance
+        #with tf.control_dependencies(update_ops):
+        train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b)
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {

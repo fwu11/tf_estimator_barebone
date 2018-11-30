@@ -8,13 +8,14 @@ import tensorflow as tf
 import os
 import math
 from utils.pascal_io_tools import read_dataset
-from models.deeplab_v3 import model_fn
+from models.deeplab_v3 import model_fn,update_argparser
 import warnings
 warnings.filterwarnings('ignore')
 
 def main(argv=None):
-
-    hparams = parser.parse_args(argv[1:])   
+    update_argparser(parser)
+    hparams = parser.parse_args(argv[1:])
+    print(hparams)
     dataset_root = 'dataset/VOCdevkit/VOC2012'
     label_root = 'dataset'
     img_dir = os.path.join(dataset_root, "JPEGImages")
@@ -58,12 +59,12 @@ def main(argv=None):
         tf_random_seed=hparams.random_seed,
         save_checkpoints_steps=hparams.save_checkpoints_steps,
         train_distribute = strategy,
-    )   
-    
+    )
+
     ws = None
     if hparams.warm_start:
         ws = tf.estimator.WarmStartSettings(ckpt_to_initialize_from="./models/resnet_v1_101/model.ckpt",
-                                            vars_to_warm_start='.*')
+                                            vars_to_warm_start=['resnet_v1_101/(block)|(conv).*'])
 
     # build an estimator
     estimator = tf.estimator.Estimator(
@@ -94,10 +95,10 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job_dir', type=str, default='./models/deeplabv3',
+        '--job_dir', type=str, default='./models/20181129',
         help='Output directory for model and training stats.')
     parser.add_argument(
-        '--train_steps', type=int, default=529100,
+        '--train_steps', type=int, default=None,
         help='Training steps.')
     parser.add_argument(
         '--batch_size', type=int, default=4,
@@ -110,7 +111,7 @@ if __name__ == "__main__":
         "--l2_regularizer", type=float, default=0.0001, 
         help="l2 regularizer parameter.")
     parser.add_argument(
-        '--starting_learning_rate', type=float, default=0.007, 
+        '--learning_rate', type=float, default=0.0001, 
         help="initial learning rate.")
     parser.add_argument(
         '--multi_grid', type=list, default=[1,2,4], 
@@ -126,10 +127,10 @@ if __name__ == "__main__":
         '--crop_size', type=int, default=513,
         help='Crop size after image preprocessing.')
     parser.add_argument(
-        '--eval-base-size', type=int, default=540,
+        '--eval_base_size', type=int, default=540,
         help='Base size to be used.')
     parser.add_argument(
-        '--eval-crop-size', type=int, default=513,
+        '--eval_crop_size', type=int, default=513,
         help='Crop size after image preprocessing.')
     parser.add_argument(
         '--num_classes', type=int, default=21,

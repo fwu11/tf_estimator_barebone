@@ -22,5 +22,6 @@ pretrain = Imagenet
 crop_size = 513  
 base_size = 540  
 output_stride = 16  
-multi_grid = [1,2,4]
+multi_grid = [1,2,4]  
+l2_regularizer = 0.0001
 

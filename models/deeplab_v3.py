@@ -17,10 +17,16 @@ from utils.metrics import *
 from utils.loss import *
 import warnings
 warnings.filterwarnings('ignore')
-
 slim = tf.contrib.slim
 
 _DEFAULT_MULTI_GRID = [1, 1, 1]
+
+def update_argparser(parser):
+    parser.set_defaults(
+        train_steps=120000,
+        learning_rate=((63000, 80000, 100000), (0.0001, 0.00005, 0.00001, 0.000001)),
+        save_checkpoints_steps=5000,
+    )
 
 
 @slim.add_arg_scope
@@ -152,7 +158,8 @@ def resnet_v1_beta(inputs,
                          resnet_utils.stack_blocks_dense],
                         outputs_collections=end_points_collection):
             if is_training is not None:
-                arg_scope = slim.arg_scope([slim.batch_norm], is_training=is_training)
+                #arg_scope = tf.contrib.framework.arg_scope([tf.contrib.layers.batch_norm], is_training=False)
+                arg_scope = slim.arg_scope([slim.batch_norm], is_training=False)
             else:
                 arg_scope = slim.arg_scope([])
             with arg_scope:
@@ -339,7 +346,6 @@ def prepare_label(input_batch, new_size, num_classes, one_hot=True):
       with last dimension comprised of 0's and 1's only.
     """
     with tf.name_scope('label_encode'):
-        #input_batch = tf.image.resize_nearest_neighbor(input_batch, new_size) # as labels are integer numbers, need to use NN interp.
         input_batch = tf.squeeze(input_batch, squeeze_dims=[3]) # reducing the channel dimension.
         if one_hot:
             input_batch = tf.one_hot(input_batch, depth=num_classes)
@@ -381,7 +387,12 @@ def model_fn(features, labels, mode, params):
 
     # configure training
     if mode == tf.estimator.ModeKeys.TRAIN:
+        # piecewise learning rate scheduler
+        global_step = tf.train.get_or_create_global_step()
+        learning_rate = tf.train.piecewise_constant(global_step, params.learning_rate[0], params.learning_rate[1])
+
         # learning rate scheduler
+        '''
         global_step = tf.train.get_or_create_global_step()
         starter_learning_rate = params.starting_learning_rate
         end_learning_rate = 0.0001
@@ -389,12 +400,13 @@ def model_fn(features, labels, mode, params):
         learning_rate = tf.train.polynomial_decay(starter_learning_rate, global_step,
                                             decay_steps, end_learning_rate,
                                             power=0.9)
+        '''
 
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
-            train_op = optimizer.minimize(loss, global_step=tf.train.get_or_create_global_step())
+        #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        #with tf.control_dependencies(update_ops):
+        train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {
