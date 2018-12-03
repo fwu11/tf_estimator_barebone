@@ -16,5 +16,5 @@ Accurarcy: 94.09% without mixup, 94.89% with mixup
 
 Model | Validation mIOU | Steps | Batch | Learning rate | Output stide | Multi grid | L2 regularizer | Num GPU |
 :------:|:------:|:-----:|:----:|:------------------------:|:--------:|:--------:|:--------:|:--------:|
-deeplab v3 | 71.41% | 120k | 4 | (63k, 80k, 100k), (0.0001, 0.00005, 0.00001, 0.000001) | 16 | [1,2,4] | 0.0001 | 1
+deeplab v3 | 71.41% | 120k | 4 | (63k, 80k, 100k), (1e-4, 5e-5, 1e-5, 1e-6) | 16 | [1,2,4] | 0.0001 | 1
 
