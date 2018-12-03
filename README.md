@@ -13,15 +13,8 @@ Accurarcy: 94.09% without mixup, 94.89% with mixup
 
 ### PASCAL VOC augmented dataset with FCN, deeplab v2 and deeplab v3
 
-deeplab v3:  
-val mIOU = 71.36% after 120k steps  
-batch = 4  
-learning_rate=((63000, 80000, 100000), (0.0001, 0.00005, 0.00001, 0.000001))  
-gpu = 1  
-pretrain = Imagenet  
-crop_size = 513  
-base_size = 540  
-output_stride = 16  
-multi_grid = [1,2,4]  
-l2_regularizer = 0.0001
+
+Model | Validation mIOU | Steps | Batch | Learning rate | output_stide | multi_grid | L2 regularizer | Num GPU |
+:----:|:------:|:-----:|:----:|:------------------------:|:--------:|:--------:|:--------:|:--------:|
+deeplab v3 | 71.41% | 120k | 4 | (63000, 80000, 100000), (0.0001, 0.00005, 0.00001, 0.000001) | 16 | 1,2,4] | 0.0001 | 1
 
