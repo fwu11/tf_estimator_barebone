@@ -113,11 +113,10 @@ class read_dataset(object):
         if random.random() < 0.5:
             img = img.filter(ImageFilter.GaussianBlur(radius=random.random()))
         
-        # ??? maybe need the mask to be [height,width,channel]
+        # mask to be [height,width,channel]
         # final transform
         img = np.asarray(img)
         mask = np.array(mask).astype(np.uint8)
-        #mask = np.squeeze(mask,axis=2)
         mask[np.where(mask == self.ignore_label)] = self.classes
         mask = mask[...,None]
 

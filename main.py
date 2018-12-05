@@ -95,13 +95,13 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job_dir', type=str, default='./models/20181129',
+        '--job_dir', type=str, default='./models/20181204',
         help='Output directory for model and training stats.')
     parser.add_argument(
         '--train_steps', type=int, default=None,
         help='Training steps.')
     parser.add_argument(
-        '--batch_size', type=int, default=4,
+        '--batch_size', type=int, default=8,
         help='Batch size to be used.')
 
     parser.add_argument(
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--num_gpus',
         help='Number of GPUs for this task',
-        default=4,
+        default=1,
         type=int)
     parser.add_argument(
         '--warm_start',

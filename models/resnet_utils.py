@@ -101,16 +101,14 @@ def conv2d_same(inputs, num_outputs, kernel_size, stride, rate=1, scope=None):
         the convolution output.
     """
     if stride == 1:
-        return tf.layers.conv2d(inputs, num_outputs, kernel_size, strides=(1,1), dilation_rate=(rate,rate),padding='SAME', name=scope)
-        #return layers_lib.conv2d(inputs, num_outputs, kernel_size, stride=1, rate=rate,padding='SAME', scope=scope)
+        return layers_lib.conv2d(inputs, num_outputs, kernel_size, stride=1, rate=rate,padding='SAME', scope=scope)
     else:
         kernel_size_effective = kernel_size + (kernel_size - 1) * (rate - 1)
         pad_total = kernel_size_effective - 1
         pad_beg = pad_total // 2
         pad_end = pad_total - pad_beg
         inputs = array_ops.pad(inputs,[[0, 0], [pad_beg, pad_end], [pad_beg, pad_end], [0, 0]])
-        return tf.layers.conv2d(inputs, num_outputs, kernel_size, strides=(stride,stride), dilation_rate=(rate,rate), padding='VALID', name=scope)
-        #return layers_lib.conv2d(inputs, num_outputs, kernel_size, stride=stride,rate=rate, padding='VALID', scope=scope)
+        return layers_lib.conv2d(inputs, num_outputs, kernel_size, stride=stride,rate=rate, padding='VALID', scope=scope)
 
 
 @add_arg_scope
@@ -209,13 +207,11 @@ def resnet_arg_scope(weight_decay=0.0001,
         An `arg_scope` to use for the resnet models.
     """
     batch_norm_params = {
-        #'momentum': batch_norm_decay,
         'decay': batch_norm_decay,
         'epsilon': batch_norm_epsilon,
         'scale': batch_norm_scale,
         #'updates_collections': ops.GraphKeys.UPDATE_OPS,
         'updates_collections': None,
-        #'training': False,
         'is_training': False,
         'trainable': True,
         #'fused': True,  # Use fused batch norm if possible.
@@ -226,11 +222,9 @@ def resnet_arg_scope(weight_decay=0.0001,
         weights_regularizer=regularizers.l2_regularizer(weight_decay),
         weights_initializer=initializers.variance_scaling_initializer(),
         activation_fn=activation_fn,
-        #normalizer_fn=tf.layers.batch_normalization  if use_batch_norm else None,
         normalizer_fn=layers.batch_norm if use_batch_norm else None,
         normalizer_params=batch_norm_params):
         
-        #with arg_scope([tf.layers.batch_normalization], **batch_norm_params):
         with arg_scope([layers.batch_norm], **batch_norm_params):
             # The following implies padding='SAME' for pool1, which makes feature
             # alignment easier for dense prediction tasks. This is also used in

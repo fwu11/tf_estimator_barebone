@@ -23,9 +23,9 @@ _DEFAULT_MULTI_GRID = [1, 1, 1]
 
 def update_argparser(parser):
     parser.set_defaults(
-        train_steps=120000,
-        learning_rate=((63000, 80000, 100000), (0.0001, 0.00005, 0.00001, 0.000001)),
-        save_checkpoints_steps=5000,
+        train_steps=100000,
+        learning_rate=((30000, 50000), (0.0001, 0.00001, 0.000001)),
+        save_checkpoints_steps=2000,
     )
 
 
@@ -158,7 +158,6 @@ def resnet_v1_beta(inputs,
                          resnet_utils.stack_blocks_dense],
                         outputs_collections=end_points_collection):
             if is_training is not None:
-                #arg_scope = tf.contrib.framework.arg_scope([tf.contrib.layers.batch_norm], is_training=False)
                 arg_scope = slim.arg_scope([slim.batch_norm], is_training=False)
             else:
                 arg_scope = slim.arg_scope([])
