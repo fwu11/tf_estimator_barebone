@@ -18,43 +18,79 @@ class ResNet_segmentation(object):
     """
     Original ResNet-101 ('resnet_v1_101.ckpt')
     """
-    def __init__(self, inputs, num_classes, phase, encoder_name):
+    def __init__(self, inputs, args, phase, encoder_name):
         if encoder_name not in ['res101', 'res50']:
             print('encoder_name ERROR!')
             print("Please input: res101, res50")
             sys.exit(-1)
         self.encoder_name = encoder_name
         self.inputs = inputs
-        self.num_classes = num_classes
+        self.num_classes = args.num_classes
         self.channel_axis = 3
         self.phase = phase # train (True) or test (False), for BN layers in the decoder
+        self.multi_grid = args.multi_grid
+        self.output_stride = args.output_stride
         self.build_network()
     
     def build_network(self):
         self.encoding = self.build_encoder()
         self.outputs = self.build_decoder(self.encoding)
         
-    def build_encoder(self):
+    def build_encoder(self, outputs_collections = None):
+        # The current_stride variable keeps track of the effective stride of the
+        # activations. This allows us to invoke atrous convolution whenever applying
+        # the next residual unit would result in the activations having stride larger
+        # than the target output_stride.
+        current_stride = 1
+
+        # The atrous convolution rate parameter.
+        rate = 1
+
         scope_name = 'resnet_v1_101' if self.encoder_name == 'res101' else 'resnet_v1_50'
         with tf.variable_scope(scope_name) as scope:
-            outputs = self._start_block('conv1')
-            with tf.variable_scope('block1') as scope:
-                outputs = self._bottleneck_resblock(outputs, 256, 'unit_1',	identity_connection=False)
-                outputs = self._bottleneck_resblock(outputs, 256, 'unit_2')
-                outputs = self._bottleneck_resblock(outputs, 256, 'unit_3')
-            with tf.variable_scope('block2') as scope:
-                outputs = self._bottleneck_resblock(outputs, 512, 'unit_1',	half_size=True, identity_connection=False)
-                for i in range(2, 5):
-                    outputs = self._bottleneck_resblock(outputs, 512, 'unit_%d' % i)
-            with tf.variable_scope('block3') as scope:
-                outputs = self._bottleneck_resblock(outputs, 1024, 'unit_1', identity_connection=False)
-                for i in range(2, 24):
-                    outputs = self._bottleneck_resblock(outputs, 1024, 'unit_%d' % i)
-            with tf.variable_scope('block4') as scope:
-                outputs = self._dilated_bottle_resblock(outputs, 2048, 4, 'unit_1', identity_connection=False)
-                outputs = self._dilated_bottle_resblock(outputs, 2048, 4, 'unit_2')
-                outputs = self._dilated_bottle_resblock(outputs, 2048, 4, 'unit_3')
-                return outputs
+            if self.output_stride is not None:
+                if self.output_stride % 4 != 0:
+                    raise ValueError('The output_stride needs to be a multiple of 4.')
+                self.output_stride /= 4
+
+            net = self._start_block('conv1')
+            net = slim.max_pool2d(net, 3, stride=2, padding='SAME', scope='pool1')
+            # block 1
+            with tf.variable_scope('block1', values=[net]) as sc:	
+                for i in range(1, 3):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
+                        net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
+                with tf.variable_scope('unit_3', values=[net]):
+                    net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
+            # block 2
+            with tf.variable_scope('block2', values=[net]) as sc:
+                for i in range(1, 4):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
+                        net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
+                with tf.variable_scope('unit_4', values=[net]):
+                    net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
+            # block 3
+            with tf.variable_scope('block3', values=[net]) as sc:
+                for i in range(1, 23):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
+                        net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
+                with tf.variable_scope('unit_23', values=[net]):
+                    net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
+            # block 4
+            with tf.variable_scope('block4', values=[net]) as sc:
+                for i in range(1, 4):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
+                        net, current_stride, rate = self._bottleneck_resblock(net, 2048, 512, stride=1, unit_rate = self.multi_grid[i-1], rate, self.output_stride, current_stride, 'block4')
+            
+            if self.output_stride is not None and current_stride != self.output_stride:
+                raise ValueError('The target output_stride cannot be reached.')
+            net = utils.collect_named_outputs(outputs_collections, sc.name, net)
+
+            if num_classes is not None:
+                net = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+                                    normalizer_fn=None, scope='logit')
+                # TODO add soft max?       
+        return net
     
     def build_decoder(self, encoding):
         with tf.variable_scope('decoder') as scope:
@@ -80,8 +116,31 @@ class ResNet_segmentation(object):
         net = self.conv2d_same(self.inputs, 64, 3, stride=2, scope='conv1_1')
         net = self.conv2d_same(net, 64, 3, stride=1, scope='conv1_2')
         net = self.conv2d_same(net, 128, 3, stride=1, scope='conv1_3')
-        net = self._max_pool2d(net, 3, 2, name='pool1')
+        #net = self._max_pool2d(net, 3, 2, name='pool1')
         return net
+
+    def _bottleneck_resblock(net, depth, depth_bottleneck, stride, unit_rate, rate, output_stride, current_stride, scope):
+        """Wrap up the bottleneck function
+        
+        
+        """
+        # If we have reached the target output_stride, then we need to employ
+        # atrous convolution with stride=1 and multiply the atrous rate by the
+        # current unit's stride for use in subsequent layers.
+        if output_stride is not None and current_stride > output_stride:
+            raise ValueError('The target output_stride cannot be reached.')
+        if output_stride is not None and current_stride == output_stride:
+            # Only uses atrous convolutions with multi-grid rates in the last (block4) block
+            if scope == "block4":
+                net = bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=rate*unit_rate)
+            else:
+                net = bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=rate)
+            rate *= stride
+        else:
+            net = bottleneck(net, depth, depth_bottleneck, stride, unit_rate, rate=1)
+            current_stride *= stride
+        
+        return net, current_stride, rate
 
     def bottleneck(inputs,
                depth,
@@ -133,52 +192,6 @@ class ResNet_segmentation(object):
 
             return output
 
-    def _bottleneck_resblock(self, x, num_o, name, half_size=False, identity_connection=True):
-        first_s = 2 if half_size else 1
-        assert num_o % 4 == 0, 'Bottleneck number of output ERROR!'
-        # branch1
-        if not identity_connection:
-            o_b1 = self._conv2d(x, 1, num_o, first_s, name='%s/bottleneck_v1/shortcut' % name)
-            o_b1 = self._batch_norm(o_b1, name='%s/bottleneck_v1/shortcut' % name, is_training=False, activation_fn=None)
-        else:
-            o_b1 = x
-        # branch2
-        o_b2a = self._conv2d(x, 1, num_o / 4, first_s, name='%s/bottleneck_v1/conv1' % name)
-        o_b2a = self._batch_norm(o_b2a, name='%s/bottleneck_v1/conv1' % name, is_training=False, activation_fn=tf.nn.relu)
-
-        o_b2b = self._conv2d(o_b2a, 3, num_o / 4, 1, name='%s/bottleneck_v1/conv2' % name)
-        o_b2b = self._batch_norm(o_b2b, name='%s/bottleneck_v1/conv2' % name, is_training=False, activation_fn=tf.nn.relu)
-
-        o_b2c = self._conv2d(o_b2b, 1, num_o, 1, name='%s/bottleneck_v1/conv3' % name)
-        o_b2c = self._batch_norm(o_b2c, name='%s/bottleneck_v1/conv3' % name, is_training=False, activation_fn=None)
-        # add
-        outputs = self._add([o_b1,o_b2c], name='%s/bottleneck_v1/add' % name)
-        # relu
-        outputs = self._relu(outputs, name='%s/bottleneck_v1/relu' % name)
-        return outputs
-
-    def _dilated_bottle_resblock(self, x, num_o, dilation_factor, name, identity_connection=True):
-        assert num_o % 4 == 0, 'Bottleneck number of output ERROR!'
-        # branch1
-        if not identity_connection:
-            o_b1 = self._conv2d(x, 1, num_o, 1, name='%s/bottleneck_v1/shortcut' % name)
-            o_b1 = self._batch_norm(o_b1, name='%s/bottleneck_v1/shortcut' % name, is_training=False, activation_fn=None)
-        else:
-            o_b1 = x
-        # branch2
-        o_b2a = self._conv2d(x, 1, num_o / 4, 1, name='%s/bottleneck_v1/conv1' % name)
-        o_b2a = self._batch_norm(o_b2a, name='%s/bottleneck_v1/conv1' % name, is_training=False, activation_fn=tf.nn.relu)
-
-        o_b2b = self._dilated_conv2d(o_b2a, 3, num_o / 4, dilation_factor, name='%s/bottleneck_v1/conv2' % name)
-        o_b2b = self._batch_norm(o_b2b, name='%s/bottleneck_v1/conv2' % name, is_training=False, activation_fn=tf.nn.relu)
-
-        o_b2c = self._conv2d(o_b2b, 1, num_o, 1, name='%s/bottleneck_v1/conv3' % name)
-        o_b2c = self._batch_norm(o_b2c, name='%s/bottleneck_v1/conv3' % name, is_training=False, activation_fn=None)
-        # add
-        outputs = self._add([o_b1,o_b2c], name='%s/bottleneck_v1/add' % name)
-        # relu
-        outputs = self._relu(outputs, name='%s/bottleneck_v1/relu' % name)
-        return outputs
 
     def _ASPP(net, scope, depth=256):
         """
@@ -307,9 +320,9 @@ def model_fn(features, labels, mode, params):
     img_input = tf.reshape(features, [-1, params.crop_size, params.crop_size, 3])
 
     # Create network
-    raw_output = deeplab_v3(img_input, params, train)
+    net = ResNet_segmentation(img_input, params, train, 'res101')
 
-    predictions = tf.argmax(raw_output, axis=-1)
+    predictions = tf.argmax(net, axis=-1)
 
     # Setup the estimator according to the phase (Train, eval)
     reduced_loss = None
@@ -317,7 +330,7 @@ def model_fn(features, labels, mode, params):
     eval_metric_ops = {}
 
     # compute loss(train and eval)
-    loss = softmax_sparse_crossentropy_ignoring_last_label(labels,raw_output)
+    loss = softmax_sparse_crossentropy_ignoring_last_label(labels,net)
 
     # L2 regularization
     l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -326,7 +339,7 @@ def model_fn(features, labels, mode, params):
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
     # evaluation metric
-    miou, update_op = mIOU(raw_output,labels,params.num_classes,img_input)
+    miou, update_op = mIOU(net,labels,params.num_classes,img_input)
 
     # configure training
     if mode == tf.estimator.ModeKeys.TRAIN:
