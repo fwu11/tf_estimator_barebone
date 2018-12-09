@@ -1,11 +1,11 @@
+# TODO verify the model
+# TODO rewrite the layers
+
 import tensorflow as tf
 from utils.loss import *
 from utils.metrics import *
 import warnings
 warnings.filterwarnings('ignore')
-slim = tf.contrib.slim
-
-_DEFAULT_MULTI_GRID = [1, 1, 1]
 
 def update_argparser(parser):
     parser.set_defaults(
@@ -53,50 +53,44 @@ class ResNet_segmentation(object):
                     raise ValueError('The output_stride needs to be a multiple of 4.')
                 self.output_stride /= 4
 
-            net = self._start_block('conv1')
-            net = slim.max_pool2d(net, 3, stride=2, padding='SAME', scope='pool1')
+            net = self._start_block()
+            net = tf.layers.max_pooling2d(net, pool_size = 3, strides=2, padding='same', name='pool1')
+
             # block 1
-            with tf.variable_scope('block1', values=[net]) as sc:	
+            with tf.variable_scope('block1', values=[net]):	
                 for i in range(1, 3):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
                         net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
                 with tf.variable_scope('unit_3', values=[net]):
                     net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
             # block 2
-            with tf.variable_scope('block2', values=[net]) as sc:
+            with tf.variable_scope('block2', values=[net]):
                 for i in range(1, 4):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
                         net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
                 with tf.variable_scope('unit_4', values=[net]):
                     net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
             # block 3
-            with tf.variable_scope('block3', values=[net]) as sc:
+            with tf.variable_scope('block3', values=[net]):
                 for i in range(1, 23):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
                         net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
                 with tf.variable_scope('unit_23', values=[net]):
                     net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
             # block 4
-            with tf.variable_scope('block4', values=[net]) as sc:
+            with tf.variable_scope('block4', values=[net]):
                 for i in range(1, 4):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
                         net, current_stride, rate = self._bottleneck_resblock(net, 2048, 512, stride=1, unit_rate = self.multi_grid[i-1], rate, self.output_stride, current_stride, 'block4')
             
             if self.output_stride is not None and current_stride != self.output_stride:
                 raise ValueError('The target output_stride cannot be reached.')
-            net = utils.collect_named_outputs(outputs_collections, sc.name, net)
-
-            if num_classes is not None:
-                net = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
-                                    normalizer_fn=None, scope='logit')
-                # TODO add soft max?       
-        return net
+            return net
     
     def build_decoder(self, encoding):
         with tf.variable_scope('decoder') as scope:
-            net = self._ASPP(encoding, "ASPP_layer", depth=256)
-            net = slim.conv2d(net, self.num_classes, [1, 1], activation_fn=None,
-                              normalizer_fn=None, scope='logits')
+            net = self._ASPP(encoding, "ASPP_layer", self.output_stride, depth=256)
+            net = self._conv2d(net, self.num_classes, 1, activation_fn=False, use_batch_norm=False, name='logits')
 
             size = tf.shape(self.inputs)[1:3]
             # resize the output logits to match the labels dimensions
@@ -104,7 +98,7 @@ class ResNet_segmentation(object):
             return outputs
 
 	# blocks
-    def _start_block(self, name):
+    def _start_block(self):
         """Gets root_block_fn for beta variant.
         ResNet-v1 beta variant modifies the first original 7x7 convolution to three
         3x3 convolutions.
@@ -113,16 +107,13 @@ class ResNet_segmentation(object):
         Returns:
         A tensor after three 3x3 convolutions.
         """
-        net = self.conv2d_same(self.inputs, 64, 3, stride=2, scope='conv1_1')
-        net = self.conv2d_same(net, 64, 3, stride=1, scope='conv1_2')
-        net = self.conv2d_same(net, 128, 3, stride=1, scope='conv1_3')
-        #net = self._max_pool2d(net, 3, 2, name='pool1')
+        net = self._conv2d_same(self.inputs, 64, 3, stride=2, scope='conv1_1')
+        net = self._conv2d_same(net, 64, 3, stride=1, scope='conv1_2')
+        net = self._conv2d_same(net, 128, 3, stride=1, scope='conv1_3')
         return net
 
-    def _bottleneck_resblock(net, depth, depth_bottleneck, stride, unit_rate, rate, output_stride, current_stride, scope):
+    def _bottleneck_resblock(self, net, depth, depth_bottleneck, stride, unit_rate, rate, output_stride, current_stride, scope):
         """Wrap up the bottleneck function
-        
-        
         """
         # If we have reached the target output_stride, then we need to employ
         # atrous convolution with stride=1 and multiply the atrous rate by the
@@ -142,14 +133,15 @@ class ResNet_segmentation(object):
         
         return net, current_stride, rate
 
-    def bottleneck(inputs,
-               depth,
-               depth_bottleneck,
-               stride,
-               unit_rate=1,
-               rate=1,
-               outputs_collections=None,
-               scope=None):
+    def bottleneck(self,
+                    inputs,
+                    depth,
+                    depth_bottleneck,
+                    stride,
+                    unit_rate=1,
+                    rate=1,
+                    outputs_collections=None,
+                    scope=None):
         """Bottleneck residual unit variant with BN after convolutions.
         This is the original residual unit proposed in [1]. See Fig. 1(a) of [2] for
         its definition. Note that we use here the bottleneck variant which has an
@@ -170,76 +162,69 @@ class ResNet_segmentation(object):
             The ResNet unit's output.
         """
         with tf.variable_scope(scope, 'bottleneck_v1', [inputs]) as sc:
-            depth_in = slim.utils.last_dimension(inputs.get_shape(), min_rank=4)
+            depth_in = tf.contrib.layers.utils.last_dimension(inputs.get_shape(), min_rank=4)
             if depth == depth_in:
-                shortcut = resnet_utils.subsample(inputs, stride, 'shortcut')
+                shortcut = self._subsample(inputs, stride, 'shortcut')
             else:
-                shortcut = slim.conv2d(
+                shortcut = self._conv2d(
                 inputs,
                 depth,
-                [1, 1],
-                stride=stride,
-                activation_fn=None,
-                scope='shortcut')
+                1,
+                stride,
+                is_training = self.phase
+                activation_fn = False,
+                name='shortcut')
 
-            residual = slim.conv2d(inputs, depth_bottleneck, [1, 1], stride=1,
-                                scope='conv1')
-            residual = resnet_utils.conv2d_same(residual, depth_bottleneck, 3, stride,
-                                                rate=rate*unit_rate, scope='conv2')
-            residual = slim.conv2d(residual, depth, [1, 1], stride=1,
-                                activation_fn=None, scope='conv3')
+            residual = self._conv2d(inputs, depth_bottleneck, num_o=1, stride=1, name='conv1')
+
+            residual = self._conv2d_same(residual, depth_bottleneck, 3, stride, rate=rate*unit_rate, name='conv2')
+            
+            residual = self._conv2d(residual, depth, num_o=1, stride=1, activation_fn=False, name='conv3')
+                                
             output = tf.nn.relu(shortcut + residual)
 
             return output
 
 
-    def _ASPP(net, scope, depth=256):
+    def _ASPP(self, net, scope, output_stride, depth=256):
         """
         ASPP consists of (a) one 1×1 convolution and three 3×3 convolutions with rates = (6, 12, 18) when output stride = 16
+        when output stride = 8, rates are doubled
         (all with 256 filters and batch normalization), and (b) the image-level features as described in https://arxiv.org/abs/1706.05587
         :param net: tensor of shape [BATCH_SIZE, WIDTH, HEIGHT, DEPTH]
         :param scope: scope name of the aspp layer
         :return: network layer with aspp applyed to it.
         """
+        if output_stride == 16:
+            rates = [6,12,18]
+        elif output_stride == 8:
+            rates = [12,24,36]
 
         with tf.variable_scope(scope):
             feature_map_size = tf.shape(net)
 
             # apply global average pooling
             image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
-            image_level_features = slim.conv2d(image_level_features, depth, [1, 1], scope="image_level_conv_1x1",
-                                            activation_fn=None)
+            image_level_features = self._conv2d(image_level_features, depth, 1, activation_fn=False, name="image_level_conv_1x1")
+
             image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
 
-            at_pool1x1 = slim.conv2d(net, depth, [1, 1], scope="conv_1x1_0", activation_fn=None)
+            at_pool1x1 = self._conv2d(net, depth, 1, activation_fn=False, name="conv_1x1_0")
 
-            at_pool3x3_1 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_1", rate=6, activation_fn=None)
+            at_pool3x3_1 = self._conv2d(net, depth, 3, rate=rates[0], activation_fn=False, name="conv_3x3_1")
 
-            at_pool3x3_2 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_2", rate=12, activation_fn=None)
+            at_pool3x3_2 = self._conv2d(net, depth, 3, rate=rates[1], activation_fn=False, name="conv_3x3_2")
 
-            at_pool3x3_3 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_3", rate=18, activation_fn=None)
+            at_pool3x3_3 = self._conv2d(net, depth, 3, rate=rates[2], activation_fn=False, name="conv_3x3_3")
 
-            net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3,
-                            name="concat")
-            net = slim.conv2d(net, depth, [1, 1], scope="conv_1x1_output", activation_fn=None)
+            net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3, name="concat")
+
+            net = self._conv2d(net, depth, 1, activation_fn=False, name="conv_1x1_output")
+            net = tf.layers.dropout(net,rate=0.1,training=self.phase, name="dropout")
+            
             return net
 
-    # layers
-    def _conv2d(self, x, kernel_size, num_o, stride, name, biased=False):
-        """
-        Conv2d without BN or relu.
-        """
-        num_x = x.shape[self.channel_axis].value
-        with tf.variable_scope(name) as scope:
-            w = tf.get_variable('weights', shape=[kernel_size, kernel_size, num_x, num_o])
-            s = [1, stride, stride, 1]
-            o = tf.nn.conv2d(x, w, s, padding='SAME')
-            if biased:
-                b = tf.get_variable('biases', shape=[num_o])
-                o = tf.nn.bias_add(o, b)
-            return o
-
-    def conv2d_same(self, inputs, num_outputs, kernel_size, stride, rate=1, scope=None):
+    def _conv2d_same(self, inputs, num_outputs, kernel_size, stride, rate=1, scope=None):
         """Strided 2-D convolution with 'SAME' padding.
         When stride > 1, then we do explicit zero-padding, followed by conv2d with
         'VALID' padding.
@@ -264,49 +249,65 @@ class ResNet_segmentation(object):
             the convolution output.
         """
         if stride == 1:
-            return tf.layers.conv2d(inputs, num_outputs, kernel_size, strides=(1,1), dilation_rate=(rate,rate),padding='SAME', name=scope)
+            return self._conv2d(inputs,num_outputs,kernel_size,1,rate,'same',name=scope)
         else:
             kernel_size_effective = kernel_size + (kernel_size - 1) * (rate - 1)
             pad_total = kernel_size_effective - 1
             pad_beg = pad_total // 2
             pad_end = pad_total - pad_beg
             inputs = tf.pad(inputs,[[0, 0], [pad_beg, pad_end], [pad_beg, pad_end], [0, 0]])
-            return tf.layers.conv2d(inputs, num_outputs, kernel_size, strides=(stride,stride), dilation_rate=(rate,rate), padding='VALID', name=scope)
-
-    def _dilated_conv2d(self, x, kernel_size, num_o, dilation_factor, name, biased=False):
+            return self._conv2d(inputs,num_outputs,kernel_size,stride,rate,'valid',name=scope) 
+    
+    def _conv2d(self, 
+			net,
+			num_o,
+			kernel_size,  
+			stride=1,
+			rate=1,				
+			padding='same', 
+			weight_decay=0.0001,
+			is_training=self.phase,
+			activation_fn=True,
+			use_batch_norm=True,
+			name = None):
+	
         """
-        Dilated conv2d without BN or relu.
+        Conv2d + BN + relu.
         """
-        num_x = x.shape[self.channel_axis].value
-        with tf.variable_scope(name) as scope:
-            w = tf.get_variable('weights', shape=[kernel_size, kernel_size, num_x, num_o])
-            o = tf.nn.atrous_conv2d(x, w, dilation_factor, padding='SAME')
-            if biased:
-                b = tf.get_variable('biases', shape=[num_o])
-                o = tf.nn.bias_add(o, b)
-            return o
+        net = tf.layers.conv2d(net,num_o,kernel_size,stride,
+                    padding,dilation_rate = rate,
+                    use_bias = False if use_batch_norm else True, kernel_initializer = tf.contrib.layers.variance_scaling_initializer(),
+                    kernel_regularizer = tf.contrib.layers.l2_regularizer(weight_decay),trainable = True,name = name)
+        if use_batch_norm:
+            # For a small batch size, it is better to keep 
+            # the statistics of the BN layers (running means and variances) frozen, 
+            # and to not update the values provided by the pre-trained model by setting is_training=False.
+            # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
+            # if they are presented in var_list of the optimiser definition.
+            # Set trainable = False to remove them from trainable_variables.
+            net = tf.contrib.layers.batch_norm(net,decay=0.997,scale=True,epsilon=1e-5,
+                                                updates_collections=tf.GraphKeys.UPDATE_OPS,
+                                                is_training=is_training,
+                                                trainable=True,
+                                                scope=name+"/BatchNorm")
+        if activation_fn:
+            net = tf.nn.relu(net)
+        return net
 
-    def _relu(self, x, name):
-        return tf.nn.relu(x, name=name)
-
-    def _add(self, x_l, name):
-        return tf.add_n(x_l, name=name)
-
-    def _max_pool2d(self, x, kernel_size, stride, name):
-        k = [1, kernel_size, kernel_size, 1]
-        s = [1, stride, stride, 1]
-        return tf.nn.max_pool(x, k, s, padding='SAME', name=name)
-        
-    def _batch_norm(self, x, name, is_training, activation_fn, trainable=True):
-        # For a small batch size, it is better to keep 
-        # the statistics of the BN layers (running means and variances) frozen, 
-        # and to not update the values provided by the pre-trained model by setting is_training=False.
-        # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
-        # if they are presented in var_list of the optimiser definition.
-        # Set trainable = False to remove them from trainable_variables.
-        with tf.variable_scope(name+'/BatchNorm') as scope:
-            o = tf.contrib.layers.batch_norm(x,scale=True,activation_fn=activation_fn,is_training=is_training,trainable=trainable,scope=scope)
-            return o
+    def _subsample(self, inputs, factor, scope=None):
+        """Subsamples the input along the spatial dimensions.
+        Args:
+        inputs: A `Tensor` of size [batch, height_in, width_in, channels].
+        factor: The subsampling factor.
+        scope: Optional variable_scope.
+        Returns:
+        output: A `Tensor` of size [batch, height_out, width_out, channels] with the
+            input, either intact (if factor == 1) or subsampled (if factor > 1).
+        """
+        if factor == 1:
+            return inputs
+        else:
+            return tf.layers.max_pooling2d(inputs, pool_size = 1, strides=factor, padding='same', name=scope)
 
 
 def model_fn(features, labels, mode, params):
