@@ -1,24 +1,27 @@
 # TODO verify the model
-# TODO rewrite the layers
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import tensorflow as tf
 from utils.loss import *
 from utils.metrics import *
+from tensorflow.contrib.layers.python.layers import utils
 import warnings
 warnings.filterwarnings('ignore')
 
 def update_argparser(parser):
     parser.set_defaults(
-        train_steps=120000,
-        learning_rate=((63000, 80000, 100000), (0.0001, 0.00005, 0.00001, 0.000001)),
-        save_checkpoints_steps=5000,
+        train_steps=80000,
+        learning_rate=((30000, 50000), (0.007, 0.001, 0.0001)),
+        save_checkpoints_steps=2000,
     )
 
 class ResNet_segmentation(object):
     """
     Original ResNet-101 ('resnet_v1_101.ckpt')
     """
-    def __init__(self, inputs, args, phase, encoder_name):
+    def __init__(self, inputs, args, phase, output_stride, encoder_name):
         if encoder_name not in ['res101', 'res50']:
             print('encoder_name ERROR!')
             print("Please input: res101, res50")
@@ -26,10 +29,15 @@ class ResNet_segmentation(object):
         self.encoder_name = encoder_name
         self.inputs = inputs
         self.num_classes = args.num_classes
-        self.channel_axis = 3
         self.phase = phase # train (True) or test (False), for BN layers in the decoder
         self.multi_grid = args.multi_grid
-        self.output_stride = args.output_stride
+        self.output_stride = output_stride
+        # The current_stride variable keeps track of the effective stride of the
+        # activations. This allows us to invoke atrous convolution whenever applying
+        # the next residual unit would result in the activations having stride larger
+        # than the target output_stride.
+        self.current_stride = 1
+        self.rate = 1  # The atrous convolution rate parameter.
         self.build_network()
     
     def build_network(self):
@@ -37,15 +45,6 @@ class ResNet_segmentation(object):
         self.outputs = self.build_decoder(self.encoding)
         
     def build_encoder(self, outputs_collections = None):
-        # The current_stride variable keeps track of the effective stride of the
-        # activations. This allows us to invoke atrous convolution whenever applying
-        # the next residual unit would result in the activations having stride larger
-        # than the target output_stride.
-        current_stride = 1
-
-        # The atrous convolution rate parameter.
-        rate = 1
-
         scope_name = 'resnet_v1_101' if self.encoder_name == 'res101' else 'resnet_v1_50'
         with tf.variable_scope(scope_name) as scope:
             if self.output_stride is not None:
@@ -60,36 +59,36 @@ class ResNet_segmentation(object):
             with tf.variable_scope('block1', values=[net]):	
                 for i in range(1, 3):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
-                        net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
+                        net = self._bottleneck_resblock(net, 256, 64, stride=1, unit_rate=1, scope='block1')
                 with tf.variable_scope('unit_3', values=[net]):
-                    net, current_stride, rate = self._bottleneck_resblock(net, 256, 64, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block1')
+                    net = self._bottleneck_resblock(net, 256, 64, stride=2, unit_rate=1, scope='block1')
             # block 2
             with tf.variable_scope('block2', values=[net]):
                 for i in range(1, 4):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
-                        net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
+                        net = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1, scope='block2')
                 with tf.variable_scope('unit_4', values=[net]):
-                    net, current_stride, rate = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block2')
+                    net = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1, scope='block2')
             # block 3
             with tf.variable_scope('block3', values=[net]):
                 for i in range(1, 23):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
-                        net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=1, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
+                        net = self._bottleneck_resblock(net, 1024, 256, stride=1, unit_rate=1, scope='block3')
                 with tf.variable_scope('unit_23', values=[net]):
-                    net, current_stride, rate = self._bottleneck_resblock(net, 1024, 256, stride=2, unit_rate=1, rate, self.output_stride, current_stride, 'block3')
+                    net = self._bottleneck_resblock(net, 1024, 256, stride=2, unit_rate=1, scope='block3')
             # block 4
             with tf.variable_scope('block4', values=[net]):
                 for i in range(1, 4):
                     with tf.variable_scope('unit_%d' % i, values=[net]):
-                        net, current_stride, rate = self._bottleneck_resblock(net, 2048, 512, stride=1, unit_rate = self.multi_grid[i-1], rate, self.output_stride, current_stride, 'block4')
+                        net = self._bottleneck_resblock(net, 2048, 512, stride=1, unit_rate = self.multi_grid[i-1], scope='block4')
             
-            if self.output_stride is not None and current_stride != self.output_stride:
+            if self.output_stride is not None and self.current_stride != self.output_stride:
                 raise ValueError('The target output_stride cannot be reached.')
             return net
     
     def build_decoder(self, encoding):
         with tf.variable_scope('decoder') as scope:
-            net = self._ASPP(encoding, "ASPP_layer", self.output_stride, depth=256)
+            net = self._ASPP(encoding, "ASPP_layer", depth=256)
             net = self._conv2d(net, self.num_classes, 1, activation_fn=False, use_batch_norm=False, name='logits')
 
             size = tf.shape(self.inputs)[1:3]
@@ -112,26 +111,26 @@ class ResNet_segmentation(object):
         net = self._conv2d_same(net, 128, 3, stride=1, scope='conv1_3')
         return net
 
-    def _bottleneck_resblock(self, net, depth, depth_bottleneck, stride, unit_rate, rate, output_stride, current_stride, scope):
+    def _bottleneck_resblock(self, net, depth, depth_bottleneck, stride, unit_rate, scope):
         """Wrap up the bottleneck function
         """
         # If we have reached the target output_stride, then we need to employ
         # atrous convolution with stride=1 and multiply the atrous rate by the
         # current unit's stride for use in subsequent layers.
-        if output_stride is not None and current_stride > output_stride:
+        if self.output_stride is not None and self.current_stride > self.output_stride:
             raise ValueError('The target output_stride cannot be reached.')
-        if output_stride is not None and current_stride == output_stride:
+        if self.output_stride is not None and self.current_stride == self.output_stride:
             # Only uses atrous convolutions with multi-grid rates in the last (block4) block
             if scope == "block4":
-                net = bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=rate*unit_rate)
+                net = self.bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=self.rate*unit_rate)
             else:
-                net = bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=rate)
-            rate *= stride
+                net = self.bottleneck(net, depth, depth_bottleneck, stride=1, unit_rate=unit_rate, rate=self.rate)
+            self.rate *= stride
         else:
-            net = bottleneck(net, depth, depth_bottleneck, stride, unit_rate, rate=1)
-            current_stride *= stride
+            net = self.bottleneck(net, depth, depth_bottleneck, stride, unit_rate, rate=1)
+            self.current_stride *= stride
         
-        return net, current_stride, rate
+        return net
 
     def bottleneck(self,
                     inputs,
@@ -162,7 +161,7 @@ class ResNet_segmentation(object):
             The ResNet unit's output.
         """
         with tf.variable_scope(scope, 'bottleneck_v1', [inputs]) as sc:
-            depth_in = tf.contrib.layers.utils.last_dimension(inputs.get_shape(), min_rank=4)
+            depth_in = utils.last_dimension(inputs.get_shape(), min_rank=4)
             if depth == depth_in:
                 shortcut = self._subsample(inputs, stride, 'shortcut')
             else:
@@ -171,22 +170,21 @@ class ResNet_segmentation(object):
                 depth,
                 1,
                 stride,
-                is_training = self.phase
                 activation_fn = False,
                 name='shortcut')
 
-            residual = self._conv2d(inputs, depth_bottleneck, num_o=1, stride=1, name='conv1')
+            residual = self._conv2d(inputs, depth_bottleneck, 1, stride=1, name='conv1')
 
-            residual = self._conv2d_same(residual, depth_bottleneck, 3, stride, rate=rate*unit_rate, name='conv2')
+            residual = self._conv2d_same(residual, depth_bottleneck, 3, stride, rate=rate*unit_rate, scope='conv2')
             
-            residual = self._conv2d(residual, depth, num_o=1, stride=1, activation_fn=False, name='conv3')
+            residual = self._conv2d(residual, depth, 1, stride=1, activation_fn=False, name='conv3')
                                 
             output = tf.nn.relu(shortcut + residual)
 
             return output
 
 
-    def _ASPP(self, net, scope, output_stride, depth=256):
+    def _ASPP(self, net, scope, depth=256):
         """
         ASPP consists of (a) one 1×1 convolution and three 3×3 convolutions with rates = (6, 12, 18) when output stride = 16
         when output stride = 8, rates are doubled
@@ -195,9 +193,12 @@ class ResNet_segmentation(object):
         :param scope: scope name of the aspp layer
         :return: network layer with aspp applyed to it.
         """
-        if output_stride == 16:
+        # get the true output_stride
+        self.output_stride *= 4
+
+        if self.output_stride == 16:
             rates = [6,12,18]
-        elif output_stride == 8:
+        elif self.output_stride == 8:
             rates = [12,24,36]
 
         with tf.variable_scope(scope):
@@ -259,25 +260,31 @@ class ResNet_segmentation(object):
             return self._conv2d(inputs,num_outputs,kernel_size,stride,rate,'valid',name=scope) 
     
     def _conv2d(self, 
-			net,
-			num_o,
-			kernel_size,  
-			stride=1,
-			rate=1,				
-			padding='same', 
-			weight_decay=0.0001,
-			is_training=self.phase,
-			activation_fn=True,
-			use_batch_norm=True,
-			name = None):
+                net,
+                num_o,
+                kernel_size,  
+                stride=1,
+                rate=1,				
+                padding='same', 
+                weight_decay=0.0001,
+                activation_fn=True,
+                use_batch_norm=True,
+                name = None):
 	
         """
         Conv2d + BN + relu.
         """
-        net = tf.layers.conv2d(net,num_o,kernel_size,stride,
-                    padding,dilation_rate = rate,
-                    use_bias = False if use_batch_norm else True, kernel_initializer = tf.contrib.layers.variance_scaling_initializer(),
-                    kernel_regularizer = tf.contrib.layers.l2_regularizer(weight_decay),trainable = True,name = name)
+        
+        net = tf.layers.conv2d(net,
+                            num_o,
+                            kernel_size,
+                            stride,
+                            padding,
+                            dilation_rate = rate,
+                            use_bias = False if use_batch_norm else True, 
+                            kernel_initializer = tf.contrib.layers.variance_scaling_initializer(),
+                            kernel_regularizer = tf.contrib.layers.l2_regularizer(weight_decay),
+                            name = name)
         if use_batch_norm:
             # For a small batch size, it is better to keep 
             # the statistics of the BN layers (running means and variances) frozen, 
@@ -285,11 +292,14 @@ class ResNet_segmentation(object):
             # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
             # if they are presented in var_list of the optimiser definition.
             # Set trainable = False to remove them from trainable_variables.
-            net = tf.contrib.layers.batch_norm(net,decay=0.997,scale=True,epsilon=1e-5,
-                                                updates_collections=tf.GraphKeys.UPDATE_OPS,
-                                                is_training=is_training,
-                                                trainable=True,
-                                                scope=name+"/BatchNorm")
+            net = tf.contrib.layers.batch_norm(net,
+                                            decay=0.997,
+                                            scale=True,
+                                            epsilon=1e-5,
+                                            updates_collections=tf.GraphKeys.UPDATE_OPS,
+                                            is_training=self.phase,
+                                            trainable=True,
+                                            scope="%s/BatchNorm" % name)
         if activation_fn:
             net = tf.nn.relu(net)
         return net
@@ -315,15 +325,20 @@ def model_fn(features, labels, mode, params):
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         train = True
+        output_stride = params.train_output_stride
     else:
         train = False
+        output_stride = params.eval_output_stride
     
     img_input = tf.reshape(features, [-1, params.crop_size, params.crop_size, 3])
 
     # Create network
-    net = ResNet_segmentation(img_input, params, train, 'res101')
+    net = ResNet_segmentation(img_input, params, train, output_stride, 'res101')
 
-    predictions = tf.argmax(net, axis=-1)
+    # predictions
+    raw_output  = net.outputs
+
+    predictions = tf.argmax(raw_output, axis=-1)
 
     # Setup the estimator according to the phase (Train, eval)
     reduced_loss = None
@@ -331,7 +346,7 @@ def model_fn(features, labels, mode, params):
     eval_metric_ops = {}
 
     # compute loss(train and eval)
-    loss = softmax_sparse_crossentropy_ignoring_last_label(labels,net)
+    loss = softmax_sparse_crossentropy_ignoring_last_label(labels,raw_output)
 
     # L2 regularization
     l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -340,7 +355,7 @@ def model_fn(features, labels, mode, params):
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
     # evaluation metric
-    miou, update_op = mIOU(net,labels,params.num_classes,img_input)
+    miou, update_op = mIOU(raw_output,labels,params.num_classes,img_input)
 
     # configure training
     if mode == tf.estimator.ModeKeys.TRAIN:
