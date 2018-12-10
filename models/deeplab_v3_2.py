@@ -7,6 +7,8 @@ import tensorflow as tf
 from utils.loss import *
 from utils.metrics import *
 from tensorflow.contrib.layers.python.layers import utils
+from tensorflow.contrib.layers.python.layers import initializers
+from tensorflow.python.framework import ops
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -89,7 +91,7 @@ class ResNet_segmentation(object):
     def build_decoder(self, encoding):
         with tf.variable_scope('decoder') as scope:
             net = self._ASPP(encoding, "ASPP_layer", depth=256)
-            net = self._conv2d(net, self.num_classes, 1, activation_fn=False, use_batch_norm=False, name='logits')
+            net = self._conv2d(net, self.num_classes, 1, activation_fn=None, use_batch_norm=False, name='logits')
 
             size = tf.shape(self.inputs)[1:3]
             # resize the output logits to match the labels dimensions
@@ -170,14 +172,14 @@ class ResNet_segmentation(object):
                 depth,
                 1,
                 stride,
-                activation_fn = False,
+                activation_fn = None,
                 name='shortcut')
 
             residual = self._conv2d(inputs, depth_bottleneck, 1, stride=1, name='conv1')
 
             residual = self._conv2d_same(residual, depth_bottleneck, 3, stride, rate=rate*unit_rate, scope='conv2')
             
-            residual = self._conv2d(residual, depth, 1, stride=1, activation_fn=False, name='conv3')
+            residual = self._conv2d(residual, depth, 1, stride=1, activation_fn=None, name='conv3')
                                 
             output = tf.nn.relu(shortcut + residual)
 
@@ -206,21 +208,21 @@ class ResNet_segmentation(object):
 
             # apply global average pooling
             image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
-            image_level_features = self._conv2d(image_level_features, depth, 1, activation_fn=False, name="image_level_conv_1x1")
+            image_level_features = self._conv2d(image_level_features, depth, 1, activation_fn=None, name="image_level_conv_1x1")
 
             image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
 
-            at_pool1x1 = self._conv2d(net, depth, 1, activation_fn=False, name="conv_1x1_0")
+            at_pool1x1 = self._conv2d(net, depth, 1, activation_fn=None, name="conv_1x1_0")
 
-            at_pool3x3_1 = self._conv2d(net, depth, 3, rate=rates[0], activation_fn=False, name="conv_3x3_1")
+            at_pool3x3_1 = self._conv2d(net, depth, 3, rate=rates[0], activation_fn=None, name="conv_3x3_1")
 
-            at_pool3x3_2 = self._conv2d(net, depth, 3, rate=rates[1], activation_fn=False, name="conv_3x3_2")
+            at_pool3x3_2 = self._conv2d(net, depth, 3, rate=rates[1], activation_fn=None, name="conv_3x3_2")
 
-            at_pool3x3_3 = self._conv2d(net, depth, 3, rate=rates[2], activation_fn=False, name="conv_3x3_3")
+            at_pool3x3_3 = self._conv2d(net, depth, 3, rate=rates[2], activation_fn=None, name="conv_3x3_3")
 
             net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3, name="concat")
 
-            net = self._conv2d(net, depth, 1, activation_fn=False, name="conv_1x1_output")
+            net = self._conv2d(net, depth, 1, activation_fn=None, name="conv_1x1_output")
             net = tf.layers.dropout(net,rate=0.1,training=self.phase, name="dropout")
             
             return net
@@ -260,45 +262,44 @@ class ResNet_segmentation(object):
             return self._conv2d(inputs,num_outputs,kernel_size,stride,rate,'valid',name=scope) 
     
     def _conv2d(self, 
-                net,
-                num_o,
-                kernel_size,  
-                stride=1,
-                rate=1,				
-                padding='same', 
-                weight_decay=0.0001,
-                activation_fn=True,
-                use_batch_norm=True,
-                name = None):
+			net,
+			num_o,
+			kernel_size,  
+			stride=1,
+			rate=1,
+			padding='SAME',			
+			weight_decay=0.0001,
+			activation_fn=tf.nn.relu,
+			use_batch_norm=True,
+			name = None):
 	
         """
         Conv2d + BN + relu.
         """
+        batch_norm_params = {
+            'decay': 0.997,
+            'epsilon': 1e-5,
+            'scale': True,
+            'updates_collections': ops.GraphKeys.UPDATE_OPS,
+            #'updates_collections': None,
+            #'is_training': False,
+            'is_training': self.phase,
+            'trainable': True,
+            'fused': True,  # Use fused batch norm if possible.
+        }
         
-        net = tf.layers.conv2d(net,
-                            num_o,
-                            kernel_size,
-                            stride,
-                            padding,
-                            dilation_rate = rate,
-                            use_bias = False if use_batch_norm else True, 
-                            kernel_initializer = tf.contrib.layers.variance_scaling_initializer(),
-                            kernel_regularizer = tf.contrib.layers.l2_regularizer(weight_decay),
-                            name = name)
-        if use_batch_norm:
-            # For a small batch size, it is better to keep 
-            # the statistics of the BN layers (running means and variances) frozen, 
-            # and to not update the values provided by the pre-trained model by setting is_training=False.
-            # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
-            # if they are presented in var_list of the optimiser definition.
-            # Set trainable = False to remove them from trainable_variables.
-            net = tf.layers.batch_normalization(net,
-                                            momentum=0.997,
-                                            epsilon=1e-5,
-                                            training=self.phase,
-                                            name="%s/BatchNorm" % name)
-        if activation_fn:
-            net = tf.nn.relu(net)
+        net = tf.contrib.layers.conv2d(net,
+                                num_o,
+                                kernel_size,
+                                stride,
+                                padding = padding,
+                                rate = rate,
+                                activation_fn = activation_fn,
+                                normalizer_fn = tf.contrib.layers.batch_norm if use_batch_norm else None,
+                                normalizer_params = batch_norm_params,
+                                weights_initializer = initializers.variance_scaling_initializer(),
+                                weights_regularizer = None,
+                                scope = name)
         return net
 
     def _subsample(self, inputs, factor, scope=None):
@@ -346,10 +347,10 @@ def model_fn(features, labels, mode, params):
     loss = softmax_sparse_crossentropy_ignoring_last_label(labels,raw_output)
 
     # L2 regularization
-    l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+    #l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
     # Loss function
-    reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
+    reduced_loss = tf.reduce_mean(loss) #+ tf.add_n(l2_losses)
 
     # evaluation metric
     miou, update_op = mIOU(raw_output,labels,params.num_classes,img_input)
