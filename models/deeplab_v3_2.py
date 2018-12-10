@@ -14,7 +14,7 @@ def update_argparser(parser):
     parser.set_defaults(
         train_steps=80000,
         learning_rate=((30000, 50000), (0.007, 0.001, 0.0001)),
-        save_checkpoints_steps=2000,
+        save_checkpoints_steps=200,
     )
 
 class ResNet_segmentation(object):
@@ -292,14 +292,11 @@ class ResNet_segmentation(object):
             # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
             # if they are presented in var_list of the optimiser definition.
             # Set trainable = False to remove them from trainable_variables.
-            net = tf.contrib.layers.batch_norm(net,
-                                            decay=0.997,
-                                            scale=True,
+            net = tf.layers.batch_normalization(net,
+                                            momentum=0.997,
                                             epsilon=1e-5,
-                                            updates_collections=tf.GraphKeys.UPDATE_OPS,
-                                            is_training=self.phase,
-                                            trainable=True,
-                                            scope="%s/BatchNorm" % name)
+                                            training=self.phase,
+                                            name="%s/BatchNorm" % name)
         if activation_fn:
             net = tf.nn.relu(net)
         return net
@@ -365,7 +362,10 @@ def model_fn(features, labels, mode, params):
 
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
-        train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
+        # comment out next two lines if batch norm is frozen
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {
