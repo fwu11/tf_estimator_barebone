@@ -17,19 +17,22 @@ from utils.metrics import *
 from utils.loss import *
 import warnings
 warnings.filterwarnings('ignore')
-slim = tf.contrib.slim
+from tensorflow.contrib import layers
+from tensorflow.contrib.framework.python.ops import add_arg_scope
+from tensorflow.contrib.framework.python.ops import arg_scope
+from tensorflow.contrib.layers.python.layers import utils
 
 _DEFAULT_MULTI_GRID = [1, 1, 1]
 
 def update_argparser(parser):
     parser.set_defaults(
-        train_steps=100000,
-        learning_rate=((30000, 50000), (0.0001, 0.00001, 0.000001)),
-        save_checkpoints_steps=2000,
+        train_steps=40000,
+        learning_rate=((20000,30000), (0.0001, 0.00001,0.000001)),
+        save_checkpoints_steps=1000,
     )
 
 
-@slim.add_arg_scope
+@add_arg_scope
 def bottleneck(inputs,
                depth,
                depth_bottleneck,
@@ -58,11 +61,11 @@ def bottleneck(inputs,
         The ResNet unit's output.
     """
     with tf.variable_scope(scope, 'bottleneck_v1', [inputs]) as sc:
-        depth_in = slim.utils.last_dimension(inputs.get_shape(), min_rank=4)
+        depth_in = utils.last_dimension(inputs.get_shape(), min_rank=4)
         if depth == depth_in:
             shortcut = resnet_utils.subsample(inputs, stride, 'shortcut')
         else:
-            shortcut = slim.conv2d(
+            shortcut = layers.conv2d(
             inputs,
             depth,
             [1, 1],
@@ -70,15 +73,15 @@ def bottleneck(inputs,
             activation_fn=None,
             scope='shortcut')
 
-        residual = slim.conv2d(inputs, depth_bottleneck, [1, 1], stride=1,
+        residual = layers.conv2d(inputs, depth_bottleneck, [1, 1], stride=1,
                             scope='conv1')
         residual = resnet_utils.conv2d_same(residual, depth_bottleneck, 3, stride,
                                             rate=rate*unit_rate, scope='conv2')
-        residual = slim.conv2d(residual, depth, [1, 1], stride=1,
+        residual = layers.conv2d(residual, depth, [1, 1], stride=1,
                             activation_fn=None, scope='conv3')
         output = tf.nn.relu(shortcut + residual)
 
-        return slim.utils.collect_named_outputs(outputs_collections,
+        return utils.collect_named_outputs(outputs_collections,
                                             sc.name,
                                             output)
 
@@ -154,33 +157,33 @@ def resnet_v1_beta(inputs,
                                       scope='conv1')
     with tf.variable_scope(scope, 'resnet_v1', [inputs]) as sc:
         end_points_collection = sc.original_name_scope + '_end_points'
-        with slim.arg_scope([slim.conv2d, bottleneck,
+        with arg_scope([layers.conv2d, bottleneck,
                          resnet_utils.stack_blocks_dense],
                         outputs_collections=end_points_collection):
             if is_training is not None:
-                arg_scope = slim.arg_scope([slim.batch_norm], is_training=False)
+                arg_sc = arg_scope([layers.batch_norm], is_training=is_training)
             else:
-                arg_scope = slim.arg_scope([])
-            with arg_scope:
+                arg_sc = arg_scope([])
+            with arg_sc:
                 net = inputs
                 if output_stride is not None:
                     if output_stride % 4 != 0:
                         raise ValueError('The output_stride needs to be a multiple of 4.')
                     output_stride /= 4
                 net = root_block_fn(net)
-                net = slim.max_pool2d(net, 3, stride=2, padding='SAME', scope='pool1')
+                net = layers.max_pool2d(net, 3, stride=2, padding='SAME', scope='pool1')
                 net = resnet_utils.stack_blocks_dense(net, blocks, output_stride)
 
                 if global_pool:
                     # Global average pooling.
                     net = tf.reduce_mean(net, [1, 2], name='pool5', keepdims=True)
                 if num_classes is not None:
-                    net = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+                    net = layers.conv2d(net, num_classes, [1, 1], activation_fn=None,
                                     normalizer_fn=None, scope='logit')
                 # Convert end_points_collection into a dictionary of end_points.
-                end_points = slim.utils.convert_collection_to_dict(end_points_collection)
+                end_points = utils.convert_collection_to_dict(end_points_collection)
                 if num_classes is not None:
-                    end_points['predictions'] = slim.softmax(net, scope='predictions')
+                    end_points['predictions'] = layers.softmax(net, scope='predictions')
                 return net, end_points
 
 
@@ -274,48 +277,55 @@ def resnet_v1_101_beta(inputs,
         root_block_fn=functools.partial(root_block_fn_for_beta_variant),
         scope=scope)
 
-@slim.add_arg_scope
-def atrous_spatial_pyramid_pooling(net, scope, depth=256):
+@add_arg_scope
+def atrous_spatial_pyramid_pooling(net, scope, output_stride, is_training, depth=256):
     """
     ASPP consists of (a) one 1×1 convolution and three 3×3 convolutions with rates = (6, 12, 18) when output stride = 16
+    when output stride = 8, rates are doubled
     (all with 256 filters and batch normalization), and (b) the image-level features as described in https://arxiv.org/abs/1706.05587
     :param net: tensor of shape [BATCH_SIZE, WIDTH, HEIGHT, DEPTH]
     :param scope: scope name of the aspp layer
     :return: network layer with aspp applyed to it.
     """
+    if output_stride == 16:
+        rates = [6,12,18]
+    elif output_stride == 8:
+        rates = [12,24,36]
 
     with tf.variable_scope(scope):
         feature_map_size = tf.shape(net)
 
         # apply global average pooling
         image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
-        image_level_features = slim.conv2d(image_level_features, depth, [1, 1], scope="image_level_conv_1x1",
+        image_level_features = layers.conv2d(image_level_features, depth, [1, 1], scope="image_level_conv_1x1",
                                            activation_fn=None)
         image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
 
-        at_pool1x1 = slim.conv2d(net, depth, [1, 1], scope="conv_1x1_0", activation_fn=None)
+        at_pool1x1 = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_0", activation_fn=None)
 
-        at_pool3x3_1 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_1", rate=6, activation_fn=None)
+        at_pool3x3_1 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_1", rate=rates[0], activation_fn=None)
 
-        at_pool3x3_2 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_2", rate=12, activation_fn=None)
+        at_pool3x3_2 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_2", rate=rates[1], activation_fn=None)
 
-        at_pool3x3_3 = slim.conv2d(net, depth, [3, 3], scope="conv_3x3_3", rate=18, activation_fn=None)
+        at_pool3x3_3 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_3", rate=rates[2], activation_fn=None)
 
         net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3,
                         name="concat")
-        net = slim.conv2d(net, depth, [1, 1], scope="conv_1x1_output", activation_fn=None)
+        net = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_output", activation_fn=None)
+        net = layers.dropout(net, keep_prob=0.9, is_training=is_training, scope="dropout")
         return net
 
 
-def deeplab_v3(inputs, args, is_training):
+def deeplab_v3(inputs, args, is_training, output_stride):
 
     # inputs has shape - Original: [batch, 513, 513, 3]
-    with slim.arg_scope(resnet_utils.resnet_arg_scope(args.l2_regularizer, is_training)):
+    with arg_scope(resnet_utils.resnet_arg_scope(args.l2_regularizer, is_training)):
         _, end_points = resnet_v1_101_beta(inputs,
                                args.num_classes,
-                               is_training=is_training,
+                               is_training=False,
+                               #is_training=is_training,
                                global_pool=False,
-                               output_stride=args.output_stride,
+                               output_stride=output_stride,
                                multi_grid=args.multi_grid)
 
         with tf.variable_scope("DeepLab_v3"):
@@ -323,9 +333,9 @@ def deeplab_v3(inputs, args, is_training):
             # get block 4 feature outputs
             net = end_points[args.resnet_model + '/block4']
 
-            net = atrous_spatial_pyramid_pooling(net, "ASPP_layer", depth=256)
+            net = atrous_spatial_pyramid_pooling(net, "ASPP_layer", output_stride, is_training, depth=256)
 
-            net = slim.conv2d(net, args.num_classes, [1, 1], activation_fn=None,
+            net = layers.conv2d(net, args.num_classes, [1, 1], activation_fn=None,
                               normalizer_fn=None, scope='logits')
 
             size = tf.shape(inputs)[1:3]
@@ -336,15 +346,19 @@ def deeplab_v3(inputs, args, is_training):
 def model_fn(features, labels, mode, params):
     ''' Model function'''
 
+    output_stride = None
+
     if mode == tf.estimator.ModeKeys.TRAIN:
         train = True
+        output_stride = params.train_output_stride
     else:
         train = False
+        output_stride = params.eval_output_stride
     
     img_input = tf.reshape(features, [-1, params.crop_size, params.crop_size, 3])
 
     # Create network
-    raw_output = deeplab_v3(img_input, params, train)
+    raw_output = deeplab_v3(img_input, params, train, output_stride)
 
     predictions = tf.argmax(raw_output, axis=-1)
 
@@ -357,9 +371,15 @@ def model_fn(features, labels, mode, params):
     loss = softmax_sparse_crossentropy_ignoring_last_label(labels,raw_output)
 
     # L2 regularization
-    l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+    #l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+
+    # Trainable Variables
+    all_trainable = tf.trainable_variables()
+    # L2 regularization
+    l2_losses = [params.l2_regularizer * tf.nn.l2_loss(v) for v in all_trainable if 'weights' in v.name]
 
     # Loss function
+    #reduced_loss = tf.reduce_mean(loss)
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
 
@@ -375,6 +395,7 @@ def model_fn(features, labels, mode, params):
 
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
+        # comment out next two lines if batch norm is frozen
         #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         #with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
