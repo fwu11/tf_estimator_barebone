@@ -187,7 +187,8 @@ def resnet_arg_scope(weight_decay=0.0001,
                      batch_norm_epsilon=1e-5,
                      batch_norm_scale=True,
                      activation_fn=nn_ops.relu,
-                     use_batch_norm=True):
+                     use_batch_norm=True,
+                     fine_tune_batch_norm = False):
     """Defines the default ResNet arg scope.
     TODO(gpapan): The batch-normalization related default values above are
         appropriate for use in conjunction with the reference ResNet models
@@ -210,16 +211,21 @@ def resnet_arg_scope(weight_decay=0.0001,
         'decay': batch_norm_decay,
         'epsilon': batch_norm_epsilon,
         'scale': batch_norm_scale,
-        #'updates_collections': ops.GraphKeys.UPDATE_OPS,
-        'updates_collections': None,
-        'is_training': False,
-        'trainable': True,
-        #'fused': True,  # Use fused batch norm if possible.
+        'updates_collections': tf.GraphKeys.UPDATE_OPS if fine_tune_batch_norm else None,
+        'is_training': is_training and fine_tune_batch_norm,
+        'fused': True,  # Use fused batch norm if possible.
     }
 
+    '''
+    Normalization function to use instead of biases. If
+    normalizer_fn is provided then biases_initializer and
+    biases_regularizer are ignored and biases are not created nor added.
+    default set to None for no normalizer function
+    '''
     with arg_scope(
         [layers_lib.conv2d],
-        weights_regularizer=regularizers.l2_regularizer(weight_decay),
+        #weights_regularizer=regularizers.l2_regularizer(weight_decay),
+        weights_regularizer=None,
         weights_initializer=initializers.variance_scaling_initializer(),
         activation_fn=activation_fn,
         normalizer_fn=layers.batch_norm if use_batch_norm else None,
