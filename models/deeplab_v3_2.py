@@ -280,10 +280,10 @@ class ResNet_segmentation(object):
             'decay': 0.997,
             'epsilon': 1e-5,
             'scale': True,
-            'updates_collections': ops.GraphKeys.UPDATE_OPS,
-            #'updates_collections': None,
-            #'is_training': False,
-            'is_training': self.phase,
+            #'updates_collections': ops.GraphKeys.UPDATE_OPS,
+            'updates_collections': None,
+            'is_training': False,
+            #'is_training': self.phase,
             'trainable': True,
             'fused': True,  # Use fused batch norm if possible.
         }
@@ -316,7 +316,72 @@ class ResNet_segmentation(object):
             return inputs
         else:
             return tf.layers.max_pooling2d(inputs, pool_size = 1, strides=factor, padding='same', name=scope)
+    
+    def _nonlocal_block(self, net, dim_inner, embed = True, softmax = True, maxpool = 2, scope = None):
+        '''
+        Args:
+            input: Input into the block. Tensor with shape (B,H,W,C)
+            dim_inner: Number of bottleneck channels.
+            embed: Whether or not use the "embedding"
+            softmax: Whether or not to use the softmax operation which makes it
+                equivalent to soft-attention.
+            maxpool: How large of a max-pooling to use to help reduce
+                the computational burden. Default is 2, use False for none.
+            scope: An optional scope for all created variables.
+        Returns:
+            A spatial non-local block.
+        '''
+        with tf.variable_scope(scope, 'nonlocal', values = [net]) as sc:
+            if embed:
+                theta =  tf.contrib.layers.conv2d(net, dim_inner, [1, 1], activation_fn=None, normalizer_fn = None, scope='theta')
+                phi = tf.contrib.layers.conv2d(net, dim_inner, [1, 1], activation_fn=None, normalizer_fn = None, scope='phi')
+            else:
+                theta = net
+                phi = net
+            g = tf.contrib.layers.conv2d(net, dim_inner, [1, 1], activation_fn=None, normalizer_fn = None, scope='g')
+            
+            # subsampling after phi and g (max pooling)
+            if maxpool is not False and maxpool > 1:
+                phi = tf.contrib.layers.max_pool2d(phi, [maxpool, maxpool], stride=maxpool, scope='pool_phi')
+                g_orig = g = tf.contrib.layers.max_pool2d(g, [maxpool, maxpool], stride=maxpool, scope='pool_g')
+            
+            # reshape (B,H,W,C) to (B,HW,C)
+            theta_flat = tf.reshape(theta, [tf.shape(theta)[0], -1, tf.shape(theta)[-1]])
+            phi_flat = tf.reshape(phi, [tf.shape(phi)[0], -1, tf.shape(phi)[-1]])
+            g_flat = tf.reshape(g, [tf.shape(g)[0], -1, tf.shape(g)[-1]])
 
+            theta_flat.set_shape([theta.shape[0], theta.shape[1] * theta.shape[2] if None not in theta.shape[1:3] else None, theta.shape[-1]])
+            phi_flat.set_shape([phi.shape[0], phi.shape[1] * phi.shape[2] if None not in phi.shape[1:3] else None, phi.shape[-1]])
+            g_flat.set_shape([g.shape[0], g.shape[1] * g.shape[2] if None not in g.shape[1:3] else None, g.shape[-1]])
+
+            # Compute f(a, b) -> (B,HW,HW)
+            f = tf.matmul(theta_flat, tf.transpose(phi_flat, [0, 2, 1]))
+            if softmax:
+                f = tf.nn.softmax(f)
+            else:
+                # replacing softmax with scaling by 1/N, N is the number of positions in x
+                f = f / tf.cast(tf.shape(f)[-1], tf.float32)
+
+            # Compute f * g ("self-attention") -> (B,HW,C)
+            fg = tf.matmul(f, g_flat)
+            # (B,HW,C) -> (B,H,W,C)
+            fg = tf.reshape(fg, tf.shape(g_orig))
+
+            # Go back up to the original depth, add residual, zero-init.
+            # batch normalization after Wz
+            batch_norm_params = {
+                'param_initializers': {'gamma': tf.zeros_initializer()},
+            }
+            fg = tf.contrib.layers.conv2d(fg, net.shape[-1], [1, 1], 
+                                        activation_fn=None,
+                                        normalizer_fn=tf.contrib.layers.batch_norm,
+                                        normalizer_params=batch_norm_params,
+                                        scope='fg')
+            
+            net = net + fg
+
+            #return slim.utils.collect_named_outputs(None, sc.name, net)
+            return net
 
 def model_fn(features, labels, mode, params):
     ''' Model function'''
@@ -349,8 +414,13 @@ def model_fn(features, labels, mode, params):
     # L2 regularization
     #l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
+    # Trainable Variables
+    all_trainable = tf.trainable_variables()
+    # L2 regularization
+    l2_losses = [params.l2_regularizer * tf.nn.l2_loss(v) for v in all_trainable if 'weights' in v.name]
+
     # Loss function
-    reduced_loss = tf.reduce_mean(loss) #+ tf.add_n(l2_losses)
+    reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
     # evaluation metric
     miou, update_op = mIOU(raw_output,labels,params.num_classes,img_input)
@@ -364,9 +434,9 @@ def model_fn(features, labels, mode, params):
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
         # comment out next two lines if batch norm is frozen
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
-            train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
+        #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        #with tf.control_dependencies(update_ops):
+        train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {
