@@ -8,15 +8,23 @@ from utils.loss import *
 from utils.metrics import *
 from tensorflow.contrib.layers.python.layers import utils
 from tensorflow.contrib.layers.python.layers import initializers
-from tensorflow.python.framework import ops
 import warnings
 warnings.filterwarnings('ignore')
 
+'''
 def update_argparser(parser):
     parser.set_defaults(
         train_steps=80000,
         learning_rate=((30000, 50000), (0.007, 0.001, 0.0001)),
         save_checkpoints_steps=200,
+    )
+'''
+
+def update_argparser(parser):
+    parser.set_defaults(
+        train_steps=40000,
+        learning_rate=((20000,30000), (0.0001, 0.00001,0.000001)),
+        save_checkpoints_steps=1000,
     )
 
 class ResNet_segmentation(object):
@@ -208,21 +216,21 @@ class ResNet_segmentation(object):
 
             # apply global average pooling
             image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
-            image_level_features = self._conv2d(image_level_features, depth, 1, activation_fn=None, name="image_level_conv_1x1")
+            image_level_features = self._conv2d(image_level_features, depth, 1, activation_fn=None, fine_tune_batch_norm = True, name="image_level_conv_1x1")
 
             image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
 
-            at_pool1x1 = self._conv2d(net, depth, 1, activation_fn=None, name="conv_1x1_0")
+            at_pool1x1 = self._conv2d(net, depth, 1, activation_fn=None, fine_tune_batch_norm = True, name="conv_1x1_0")
 
-            at_pool3x3_1 = self._conv2d(net, depth, 3, rate=rates[0], activation_fn=None, name="conv_3x3_1")
+            at_pool3x3_1 = self._conv2d(net, depth, 3, rate=rates[0], activation_fn=None, fine_tune_batch_norm = True, name="conv_3x3_1")
 
-            at_pool3x3_2 = self._conv2d(net, depth, 3, rate=rates[1], activation_fn=None, name="conv_3x3_2")
+            at_pool3x3_2 = self._conv2d(net, depth, 3, rate=rates[1], activation_fn=None, fine_tune_batch_norm = True, name="conv_3x3_2")
 
-            at_pool3x3_3 = self._conv2d(net, depth, 3, rate=rates[2], activation_fn=None, name="conv_3x3_3")
+            at_pool3x3_3 = self._conv2d(net, depth, 3, rate=rates[2], activation_fn=None, fine_tune_batch_norm = True, name="conv_3x3_3")
 
             net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3, name="concat")
 
-            net = self._conv2d(net, depth, 1, activation_fn=None, name="conv_1x1_output")
+            net = self._conv2d(net, depth, 1, activation_fn=None, fine_tune_batch_norm = True, name="conv_1x1_output")
             net = tf.layers.dropout(net,rate=0.1,training=self.phase, name="dropout")
             
             return net
@@ -271,6 +279,7 @@ class ResNet_segmentation(object):
 			weight_decay=0.0001,
 			activation_fn=tf.nn.relu,
 			use_batch_norm=True,
+            fine_tune_batch_norm = False,
 			name = None):
 	
         """
@@ -280,10 +289,8 @@ class ResNet_segmentation(object):
             'decay': 0.997,
             'epsilon': 1e-5,
             'scale': True,
-            #'updates_collections': ops.GraphKeys.UPDATE_OPS,
-            'updates_collections': None,
-            'is_training': False,
-            #'is_training': self.phase,
+            'updates_collections': tf.GraphKeys.UPDATE_OPS if fine_tune_batch_norm else None,
+            'is_training': self.phase and fine_tune_batch_norm,
             'trainable': True,
             'fused': True,  # Use fused batch norm if possible.
         }
@@ -434,9 +441,9 @@ def model_fn(features, labels, mode, params):
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
         # comment out next two lines if batch norm is frozen
-        #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        #with tf.control_dependencies(update_ops):
-        train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {
