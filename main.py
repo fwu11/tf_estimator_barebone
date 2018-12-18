@@ -8,7 +8,7 @@ import tensorflow as tf
 import os
 import math
 from utils.pascal_io_tools import read_dataset
-from models.deeplab_v3 import model_fn,update_argparser
+from models.deeplab_v3_2 import model_fn,update_argparser
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -28,7 +28,7 @@ def main(argv=None):
     train_ds = read_dataset(img_dir,
                             label_dir,
                             train_file_path, 
-                            hparams.batch_size, 
+                            hparams.train_batch_size, 
                             "train",
                             hparams.base_size,
                             hparams.crop_size, 
@@ -39,7 +39,7 @@ def main(argv=None):
     eval_ds = read_dataset(img_dir,
                             label_dir,
                             val_file_path, 
-                            hparams.batch_size, 
+                            hparams.eval_batch_size, 
                             "eval",
                             hparams.eval_base_size,
                             hparams.eval_crop_size, 
@@ -59,6 +59,7 @@ def main(argv=None):
         tf_random_seed=hparams.random_seed,
         save_checkpoints_steps=hparams.save_checkpoints_steps,
         train_distribute = strategy,
+        eval_distribute = strategy
     )
 
     ws = None
@@ -82,7 +83,7 @@ def main(argv=None):
     )
 
     num_eval_examples = eval_ds.num_examples
-    eval_steps_per_epoch = math.ceil(num_eval_examples / hparams.batch_size)
+    eval_steps_per_epoch = math.ceil(num_eval_examples / hparams.eval_batch_size)
 
     eval_spec = tf.estimator.EvalSpec(
         input_fn = lambda: eval_ds.get_input_fn(),
@@ -95,13 +96,16 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job_dir', type=str, default='./models/20181204',
+        '--job_dir', type=str, default='./models/20181218',
         help='Output directory for model and training stats.')
     parser.add_argument(
         '--train_steps', type=int, default=None,
         help='Training steps.')
     parser.add_argument(
-        '--batch_size', type=int, default=8,
+        '--train_batch_size', type=int, default=8,
+        help='Batch size to be used.')
+    parser.add_argument(
+        '--eval_batch_size', type=int, default=8,
         help='Batch size to be used.')
 
     parser.add_argument(
@@ -117,8 +121,11 @@ if __name__ == "__main__":
         '--multi_grid', type=list, default=[1,2,4], 
         help="Spatial Pyramid Pooling rates")
     parser.add_argument(
-        '--output_stride', type=int, default=16, 
-        help="Spatial Pyramid Pooling rates")
+        '--train_output_stride', type=int, default=16, 
+        help="Train Spatial Pyramid Pooling rates")
+    parser.add_argument(
+        '--eval_output_stride', type=int, default=16, 
+        help="Eval Spatial Pyramid Pooling rates")
         
     parser.add_argument(
         '--base_size', type=int, default=540,
@@ -151,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--num_gpus',
         help='Number of GPUs for this task',
-        default=1,
+        default=4,
         type=int)
     parser.add_argument(
         '--warm_start',
