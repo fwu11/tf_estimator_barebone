@@ -21,6 +21,7 @@ from tensorflow.contrib import layers
 from tensorflow.contrib.framework.python.ops import add_arg_scope
 from tensorflow.contrib.framework.python.ops import arg_scope
 from tensorflow.contrib.layers.python.layers import utils
+from tensorflow.contrib.layers.python.layers import regularizers
 
 _DEFAULT_MULTI_GRID = [1, 1, 1]
 
@@ -277,8 +278,7 @@ def resnet_v1_101_beta(inputs,
         root_block_fn=functools.partial(root_block_fn_for_beta_variant),
         scope=scope)
 
-@add_arg_scope
-def atrous_spatial_pyramid_pooling(net, scope, output_stride, is_training, depth=256):
+def atrous_spatial_pyramid_pooling(net, scope, output_stride, is_training, weight_decay, depth=256):
     """
     ASPP consists of (a) one 1×1 convolution and three 3×3 convolutions with rates = (6, 12, 18) when output stride = 16
     when output stride = 8, rates are doubled
@@ -293,55 +293,71 @@ def atrous_spatial_pyramid_pooling(net, scope, output_stride, is_training, depth
         rates = [12,24,36]
 
     with tf.variable_scope(scope):
-        feature_map_size = tf.shape(net)
+        batch_norm_params = {
+            'is_training': is_training,
+            'decay': 0.9997,
+            'epsilon': 1e-5,
+            'scale': True,
+        }
 
-        # apply global average pooling
-        image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
-        image_level_features = layers.conv2d(image_level_features, depth, [1, 1], scope="image_level_conv_1x1",
-                                           activation_fn=None)
-        image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
+        with arg_scope(
+            [layers.conv2d],
+            # comment next line of code if multiple gpus are used
+            weights_regularizer=regularizers.l2_regularizer(weight_decay),
+            activation_fn=tf.nn.relu,
+            normalizer_fn=layers.batch_norm,
+            normalizer_params=batch_norm_params):
+            
+            with arg_scope([layers.batch_norm], **batch_norm_params):
 
-        at_pool1x1 = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_0", activation_fn=None)
+                feature_map_size = tf.shape(net)
+                # apply global average pooling
+                image_level_features = tf.reduce_mean(net, [1, 2], name='image_level_global_pool', keepdims=True)
+                image_level_features = layers.conv2d(image_level_features, depth, [1, 1], scope="image_level_conv_1x1",
+                                                activation_fn=None)
+                image_level_features = tf.image.resize_bilinear(image_level_features, (feature_map_size[1], feature_map_size[2]))
 
-        at_pool3x3_1 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_1", rate=rates[0], activation_fn=None)
+                at_pool1x1 = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_0", activation_fn=None)
 
-        at_pool3x3_2 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_2", rate=rates[1], activation_fn=None)
+                at_pool3x3_1 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_1", rate=rates[0], activation_fn=None)
 
-        at_pool3x3_3 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_3", rate=rates[2], activation_fn=None)
+                at_pool3x3_2 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_2", rate=rates[1], activation_fn=None)
 
-        net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3,
-                        name="concat")
-        net = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_output", activation_fn=None)
-        net = layers.dropout(net, keep_prob=0.9, is_training=is_training, scope="dropout")
-        return net
+                at_pool3x3_3 = layers.conv2d(net, depth, [3, 3], scope="conv_3x3_3", rate=rates[2], activation_fn=None)
 
+                net = tf.concat((image_level_features, at_pool1x1, at_pool3x3_1, at_pool3x3_2, at_pool3x3_3), axis=3,
+                                name="concat")
+                net = layers.conv2d(net, depth, [1, 1], scope="conv_1x1_output", activation_fn=None)
+                net = layers.dropout(net, keep_prob=0.9, is_training=is_training, scope="dropout")
+                return net
 
+#用@add_arg_scope修饰目标函数
+#用with arg_scope(...) 设置默认参数.
 def deeplab_v3(inputs, args, is_training, output_stride):
 
     # inputs has shape - Original: [batch, 513, 513, 3]
     with arg_scope(resnet_utils.resnet_arg_scope(args.l2_regularizer, is_training)):
         _, end_points = resnet_v1_101_beta(inputs,
                                args.num_classes,
-                               is_training=False,
-                               #is_training=is_training,
+                               is_training=is_training,
                                global_pool=False,
                                output_stride=output_stride,
                                multi_grid=args.multi_grid)
 
-        with tf.variable_scope("DeepLab_v3"):
+    with tf.variable_scope("DeepLab_v3"):
 
-            # get block 4 feature outputs
-            net = end_points[args.resnet_model + '/block4']
+        # get block 4 feature outputs
+        net = end_points[args.resnet_model + '/block4']
 
-            net = atrous_spatial_pyramid_pooling(net, "ASPP_layer", output_stride, is_training, depth=256)
+        net = atrous_spatial_pyramid_pooling(net, "ASPP_layer", output_stride, is_training, args.l2_regularizer, depth=256)
 
-            net = layers.conv2d(net, args.num_classes, [1, 1], activation_fn=None,
-                              normalizer_fn=None, scope='logits')
+        net = layers.conv2d(net, args.num_classes, [1, 1], activation_fn=None,
+                            normalizer_fn=None, scope='logits')
 
-            size = tf.shape(inputs)[1:3]
-            # resize the output logits to match the labels dimensions
-            net = tf.image.resize_bilinear(net, size)
-            return net
+        size = tf.shape(inputs)[1:3]
+        # resize the output logits to match the labels dimensions
+        net = tf.image.resize_bilinear(net, size)
+        return net
 
 def model_fn(features, labels, mode, params):
     ''' Model function'''
@@ -371,12 +387,12 @@ def model_fn(features, labels, mode, params):
     loss = softmax_sparse_crossentropy_ignoring_last_label(labels,raw_output)
 
     # L2 regularization
-    #l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+    l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
     # Trainable Variables
-    all_trainable = tf.trainable_variables()
+    #all_trainable = tf.trainable_variables()
     # L2 regularization
-    l2_losses = [params.l2_regularizer * tf.nn.l2_loss(v) for v in all_trainable if 'weights' in v.name]
+    #l2_losses = [params.l2_regularizer * tf.nn.l2_loss(v) for v in all_trainable if 'weights' in v.name]
 
     # Loss function
     #reduced_loss = tf.reduce_mean(loss)
@@ -393,12 +409,24 @@ def model_fn(features, labels, mode, params):
         global_step = tf.train.get_or_create_global_step()
         learning_rate = tf.train.piecewise_constant(global_step, params.learning_rate[0], params.learning_rate[1])
 
+        '''
+        # learning rate scheduler
+        global_step = tf.train.get_or_create_global_step()
+        starter_learning_rate = 0.0001
+        end_learning_rate = 0
+        decay_steps = params.train_steps
+        learning_rate = tf.train.polynomial_decay(starter_learning_rate, global_step,
+                                            decay_steps, end_learning_rate,
+                                            power=0.9)
+        '''
+        
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
         # comment out next two lines if batch norm is frozen
-        #update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        #with tf.control_dependencies(update_ops):
-        train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
+        # NOTE still need this because aspp needs batch norm
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            train_op = optimizer.minimize(reduced_loss, global_step=tf.train.get_or_create_global_step())
 
     if mode  == tf.estimator.ModeKeys.EVAL:
         eval_metric_ops = {
@@ -413,3 +441,4 @@ def model_fn(features, labels, mode, params):
         eval_metric_ops=eval_metric_ops,
         export_outputs=None,
     )
+	

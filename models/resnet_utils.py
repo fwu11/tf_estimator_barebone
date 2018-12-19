@@ -211,7 +211,6 @@ def resnet_arg_scope(weight_decay=0.0001,
         'decay': batch_norm_decay,
         'epsilon': batch_norm_epsilon,
         'scale': batch_norm_scale,
-        'updates_collections': tf.GraphKeys.UPDATE_OPS if fine_tune_batch_norm else None,
         'is_training': is_training and fine_tune_batch_norm,
         'fused': True,  # Use fused batch norm if possible.
     }
@@ -224,8 +223,8 @@ def resnet_arg_scope(weight_decay=0.0001,
     '''
     with arg_scope(
         [layers_lib.conv2d],
-        #weights_regularizer=regularizers.l2_regularizer(weight_decay),
-        weights_regularizer=None,
+        # comment next line of code if multiple gpus are used
+        weights_regularizer=regularizers.l2_regularizer(weight_decay),
         weights_initializer=initializers.variance_scaling_initializer(),
         activation_fn=activation_fn,
         normalizer_fn=layers.batch_norm if use_batch_norm else None,
