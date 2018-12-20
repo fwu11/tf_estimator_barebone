@@ -15,9 +15,9 @@ warnings.filterwarnings('ignore')
 
 def update_argparser(parser):
     parser.set_defaults(
-        train_steps=100000,
-        learning_rate=((60000, 80000), (0.0001, 0.00001,0.000001)),
-        save_checkpoints_steps=200,
+        train_steps=80000,
+        learning_rate=((10000, 50000), (0.001, 0.0001,0.00001)),
+        save_checkpoints_steps=1000,
     )
 
 '''
@@ -74,21 +74,26 @@ class ResNet_segmentation(object):
                         net = self._bottleneck_resblock(net, 256, 64, stride=1, unit_rate=1)
                 with tf.variable_scope('unit_3'):
                     net = self._bottleneck_resblock(net, 256, 64, stride=2, unit_rate=1)
-            # block 2
-            with tf.variable_scope('block2'):
-                for i in range(1, 4):
-                    with tf.variable_scope('unit_%d' % i):
-                        net = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1)
-                with tf.variable_scope('unit_4'):
-                    net = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1)
 
-            # block 3
-            with tf.variable_scope('block3'):
+            # block 2
+            with tf.variable_scope('block2', values=[net]):
+                for i in range(1, 4):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
+                        net = self._bottleneck_resblock(net, 512, 128, stride=1, unit_rate=1)
+                with tf.variable_scope('unit_4', values=[net]):
+                    net = self._bottleneck_resblock(net, 512, 128, stride=2, unit_rate=1)
+            
+            '''
+            # block 3, has nonlocal block
+            with tf.variable_scope('block3', values=[net]):
                 for i in range(1, 23):
-                    with tf.variable_scope('unit_%d' % i):
+                    with tf.variable_scope('unit_%d' % i, values=[net]):
                         net = self._bottleneck_resblock(net, 1024, 256, stride=1, unit_rate=1)
-                with tf.variable_scope('unit_23'):
+                with tf.variable_scope('unit_23', values=[net]):
                     net = self._bottleneck_resblock(net, 1024, 256, stride=2, unit_rate=1)
+            '''
+            #block 3, has nonlocal block
+            net = self._res_stage_nonlocal(net, 1024, stride = 2, block_id=3, num_blocks = 23, nonlocal_mod = 7, apply_nonlocal = True)
 
             # block 4
             with tf.variable_scope('block4'):
@@ -170,7 +175,7 @@ class ResNet_segmentation(object):
         Returns:
             The ResNet unit's output.
         """
-        with tf.variable_scope(scope, 'bottleneck_v1', [inputs]) as sc:
+        with tf.variable_scope(scope, 'bottleneck_v1', [inputs]):
             depth_in = utils.last_dimension(inputs.get_shape(), min_rank=4)
             if depth == depth_in:
                 shortcut = self._subsample(inputs, stride, 'shortcut')
@@ -290,7 +295,6 @@ class ResNet_segmentation(object):
             'epsilon': 1e-5,
             'scale': True,
             'is_training': self.phase and fine_tune_batch_norm,
-            'trainable': True,
             'fused': True,  # Use fused batch norm if possible.
         }
         
@@ -323,6 +327,89 @@ class ResNet_segmentation(object):
         else:
             return tf.layers.max_pooling2d(inputs, pool_size = 1, strides=factor, padding='same', name=scope)
 
+    def _res_stage_nonlocal(self, net, depth, stride, block_id, num_blocks, nonlocal_mod, apply_nonlocal):
+        count = 0
+        with tf.variable_scope('block%d' %block_id):
+            for i in range(1,num_blocks+1):
+                with tf.variable_scope('unit_%d' % i):
+                    block_stride = 2 if (i == num_blocks and stride == 2) else 1
+                    net = self._bottleneck_resblock(net, depth = depth, depth_bottleneck = depth//4, stride = block_stride, unit_rate=1)
+                
+                if (i % nonlocal_mod == nonlocal_mod - 1) and apply_nonlocal:
+                    net = self._nonlocal_block(net, dim_inner=depth//2, scope= 'nonlocal_%d' % count)
+                    count += 1
+
+            return net
+
+    def _nonlocal_block(self, net, dim_inner, embed = True, softmax = True, maxpool = 2, scope = None):
+        '''
+        Args:
+            input: Input into the block. Tensor with shape (B,H,W,C)
+            dim_inner: Number of bottleneck channels.
+            embed: Whether or not use the "embedding"
+            softmax: Whether or not to use the softmax operation which makes it
+                equivalent to soft-attention.
+            maxpool: How large of a max-pooling to use to help reduce
+                the computational burden. Default is 2, use False for none.
+            scope: An optional scope for all created variables.
+        Returns:
+            A spatial non-local block.
+        '''
+        with tf.variable_scope(scope):
+            if embed:
+                theta =  tf.contrib.layers.conv2d(net, dim_inner//4, [1, 1], activation_fn=None, normalizer_fn = None, scope='theta')
+                phi = tf.contrib.layers.conv2d(net, dim_inner//4, [1, 1], activation_fn=None, normalizer_fn = None, scope='phi')
+            else:
+                theta = net
+                phi = net
+            g_orig = g = tf.contrib.layers.conv2d(net, dim_inner, [1, 1], activation_fn=None, normalizer_fn = None, scope='g')
+            
+            # subsampling after phi and g (max pooling)
+            if maxpool is not False and maxpool > 1:
+                phi = tf.contrib.layers.max_pool2d(phi, [maxpool, maxpool], stride=maxpool, scope='pool_phi')
+                g = tf.contrib.layers.max_pool2d(g, [maxpool, maxpool], stride=maxpool, scope='pool_g')
+            
+            # reshape (B,H,W,C) to (B,HW,C)
+            theta_flat = tf.reshape(theta, [tf.shape(theta)[0], -1, tf.shape(theta)[-1]])
+            phi_flat = tf.reshape(phi, [tf.shape(phi)[0], -1, tf.shape(phi)[-1]])
+            g_flat = tf.reshape(g, [tf.shape(g)[0], -1, tf.shape(g)[-1]])
+
+            theta_flat.set_shape([theta.shape[0], theta.shape[1] * theta.shape[2] if None not in theta.shape[1:3] else None, theta.shape[-1]])
+            phi_flat.set_shape([phi.shape[0], phi.shape[1] * phi.shape[2] if None not in phi.shape[1:3] else None, phi.shape[-1]])
+            g_flat.set_shape([g.shape[0], g.shape[1] * g.shape[2] if None not in g.shape[1:3] else None, g.shape[-1]])
+
+            # Compute f(a, b) -> (B,HW,HW)
+            f = tf.matmul(theta_flat, tf.transpose(phi_flat, [0, 2, 1]))
+            if softmax:
+                f = tf.nn.softmax(f)
+            else:
+                # replacing softmax with scaling by 1/N, N is the number of positions in x
+                f = f / tf.cast(tf.shape(f)[-1], tf.float32)
+
+            # Compute f * g ("self-attention") -> (B,HW,C)
+            fg = tf.matmul(f, g_flat)
+            # (B,HW,C) -> (B,H,W,C)
+            fg = tf.reshape(fg, tf.shape(g_orig))
+
+            # Go back up to the original depth, add residual, zero-init.
+            # batch normalization after Wz
+            batch_norm_params = {
+                'decay': 0.997,
+                'epsilon': 1e-5,
+                'scale': True,
+                'param_initializers': {'gamma': tf.zeros_initializer()},
+                'is_training': self.phase,
+                'fused': True,
+            }
+            fg = tf.contrib.layers.conv2d(fg, net.shape[-1], [1, 1], 
+                                        activation_fn=None,
+                                        normalizer_fn=tf.contrib.layers.batch_norm,
+                                        normalizer_params=batch_norm_params,
+                                        scope='fg')
+            
+            net = net + fg
+            return net
+
 def model_fn(features, labels, mode, params):
     ''' Model function'''
 
@@ -354,6 +441,7 @@ def model_fn(features, labels, mode, params):
     # L2 regularization
     l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
+
     # Loss function
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
@@ -365,6 +453,9 @@ def model_fn(features, labels, mode, params):
         # piecewise learning rate scheduler
         global_step = tf.train.get_or_create_global_step()
         learning_rate = tf.train.piecewise_constant(global_step, params.learning_rate[0], params.learning_rate[1])
+        
+        # make learning rate available to TensorBoard in TRAIN modes
+        tf.summary.scalar('Learning_rate', learning_rate)    
 
         # SGD + momentum optimizer
         optimizer = tf.train.MomentumOptimizer(learning_rate,momentum = 0.9)
