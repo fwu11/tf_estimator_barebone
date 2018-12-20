@@ -112,7 +112,9 @@ def conv2d_same(inputs, num_outputs, kernel_size, stride, rate=1, scope=None):
 
 
 @add_arg_scope
-def stack_blocks_dense(net, blocks, multi_grid, output_stride=None,
+def stack_blocks_dense(net, 
+                       blocks, 
+                       output_stride=None,
                        outputs_collections=None):
     """Stacks ResNet `Blocks` and controls output feature density.
     First, this function creates scopes for the ResNet in the form of
@@ -164,15 +166,12 @@ def stack_blocks_dense(net, blocks, multi_grid, output_stride=None,
                     # atrous convolution with stride=1 and multiply the atrous rate by the
                     # current unit's stride for use in subsequent layers.
                     if output_stride is not None and current_stride == output_stride:
-                        # Only uses atrous convolutions with multi-graid rates in the last (block4) block
-                        if block.scope == "block4":
-                            net = block.unit_fn(net, rate=rate * multi_grid[i], **dict(unit, stride=1))
-                        else:
-                            net = block.unit_fn(net, rate=rate, **dict(unit, stride=1))
+                        net = block.unit_fn(net, rate=rate, **dict(unit, stride=1))
                         rate *= unit.get('stride', 1)
                     else:
                         net = block.unit_fn(net, rate=1, **unit)
                         current_stride *= unit.get('stride', 1)
+
             net = utils.collect_named_outputs(outputs_collections, sc.name, net)
 
     if output_stride is not None and current_stride != output_stride:

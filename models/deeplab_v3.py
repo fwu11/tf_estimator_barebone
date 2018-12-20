@@ -29,7 +29,7 @@ def update_argparser(parser):
     parser.set_defaults(
         train_steps=40000,
         learning_rate=((20000,30000), (0.0001, 0.00001,0.000001)),
-        save_checkpoints_steps=1000,
+        save_checkpoints_steps=200,
     )
 
 
@@ -171,6 +171,7 @@ def resnet_v1_beta(inputs,
                     if output_stride % 4 != 0:
                         raise ValueError('The output_stride needs to be a multiple of 4.')
                     output_stride /= 4
+                    print(str(output_stride) + 'Before resnet blocks')
                 net = root_block_fn(net)
                 net = layers.max_pool2d(net, 3, stride=2, padding='SAME', scope='pool1')
                 net = resnet_utils.stack_blocks_dense(net, blocks, output_stride)
@@ -395,7 +396,6 @@ def model_fn(features, labels, mode, params):
     #l2_losses = [params.l2_regularizer * tf.nn.l2_loss(v) for v in all_trainable if 'weights' in v.name]
 
     # Loss function
-    #reduced_loss = tf.reduce_mean(loss)
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
 
 
