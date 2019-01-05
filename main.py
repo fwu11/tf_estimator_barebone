@@ -8,7 +8,7 @@ import tensorflow as tf
 import os
 import math
 from utils.pascal_io_tools import read_dataset
-from models.deeplab_v3_2 import model_fn,update_argparser
+from models.deeplab_v3_nonlocal import model_fn,update_argparser
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -59,13 +59,12 @@ def main(argv=None):
         tf_random_seed=hparams.random_seed,
         save_checkpoints_steps=hparams.save_checkpoints_steps,
         train_distribute = strategy,
-        eval_distribute = strategy
     )
 
     ws = None
     if hparams.warm_start:
         ws = tf.estimator.WarmStartSettings(ckpt_to_initialize_from="./models/resnet_v1_101/model.ckpt",
-                                            vars_to_warm_start=['resnet_v1_101/(block)|(conv).*'])
+                                            vars_to_warm_start=['resnet_v1_101/block.*/unit.*','resnet_v1_101/conv.*'])
 
     # build an estimator
     estimator = tf.estimator.Estimator(
@@ -96,7 +95,7 @@ if __name__ == "__main__":
     # Setup input args parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--job_dir', type=str, default='./models/20181218',
+        '--job_dir', type=str, default='./models/nonlocal_eval_8',
         help='Output directory for model and training stats.')
     parser.add_argument(
         '--train_steps', type=int, default=None,
@@ -105,7 +104,7 @@ if __name__ == "__main__":
         '--train_batch_size', type=int, default=8,
         help='Batch size to be used.')
     parser.add_argument(
-        '--eval_batch_size', type=int, default=8,
+        '--eval_batch_size', type=int, default=4,
         help='Batch size to be used.')
 
     parser.add_argument(
@@ -124,7 +123,7 @@ if __name__ == "__main__":
         '--train_output_stride', type=int, default=16, 
         help="Train Spatial Pyramid Pooling rates")
     parser.add_argument(
-        '--eval_output_stride', type=int, default=16, 
+        '--eval_output_stride', type=int, default=8, 
         help="Eval Spatial Pyramid Pooling rates")
         
     parser.add_argument(
@@ -158,7 +157,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--num_gpus',
         help='Number of GPUs for this task',
-        default=4,
+        default=1,
         type=int)
     parser.add_argument(
         '--warm_start',

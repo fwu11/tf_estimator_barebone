@@ -15,8 +15,8 @@ warnings.filterwarnings('ignore')
 
 def update_argparser(parser):
     parser.set_defaults(
-        train_steps=80000,
-        learning_rate=((10000, 50000), (0.001, 0.0001,0.00001)),
+        train_steps=50000,
+        learning_rate=((10000, 40000), (0.001, 0.0001,0.00001)),
         save_checkpoints_steps=1000,
     )
 

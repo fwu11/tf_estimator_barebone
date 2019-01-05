@@ -12,8 +12,9 @@ python -u main.py --dataset cifar10 --model cifar10_resnet --job-dir ./cifar10
 ```
 | Model | Validation mIOU | Batch | Learning rate | Output stide | Multi grid | L2 regularizer | Num GPU | Batchnorm | Nonlocal |
 |:------:|:------:|:-----:|:----------------------:|:--------:|:--------:|:--------:|:--------:|:------:|:------:|
-| deeplab v3 | 71.41% | 4 | (63k, 80k, 100k), (1e-4, 5e-5, 1e-5, 1e-6) | 16 | [1,2,4] | 0.0001 | 1 | frozen | No |
-| deeplab v3 | 71.41% | 8 | (63k, 80k, 100k), (1e-4, 5e-5, 1e-5, 1e-6) | 16 | [1,2,4] | 0.0001 | 1 | frozen | Yes |
+| deeplab v3 | 71.41% | 4 | (63k, 80k, 100k), (1e-4, 5e-5, 1e-5, 1e-6) | 16 | [1,2,4] | 0.0001 | 1 | frozen | 0 |
+| deeplab v3 | 74.5% | 8 | (63k, 80k, 100k), (1e-4, 5e-5, 1e-5, 1e-6) | 16 | [1,2,4] | 0.0001 | 1 | frozen | 3 |
+| deeplab v3 | 75.04% | 8 | (10k, 40k), (1e-3, 1e-4, 1e-5) | 8 | [1,2,4] | 0.0001 | 1 | frozen | 3 |
 
 
 ### DAVIS with deeplab v3 + Nonlocal block
