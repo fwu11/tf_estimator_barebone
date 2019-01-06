@@ -7,7 +7,7 @@ DAVIS video segmentation
 ### PASCAL VOC augmented dataset with deeplab v3 and non-local blocks 
 Usage:
 ```bash
-python -u main.py --dataset cifar10 --model cifar10_resnet --job-dir ./cifar10
+python -u main.py --job-dir ./models/deeplabv3_nonlocal
 
 ```
 | Model | Validation mIOU | Batch | Learning rate | Output stride | Multi grid | L2 regularizer | Num GPU | Batchnorm | Nonlocal |
