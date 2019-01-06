@@ -4,7 +4,7 @@ TensorFlow Image and Video Segmentation project template with high-level API
 ## Examples
 PASCAL VOC image segmentation  
 DAVIS video segmentation
-### PASCAL VOC augmented dataset with FCN, deeplab v2 and deeplab v3  
+### PASCAL VOC augmented dataset with deeplab v3 and non-local blocks 
 Usage:
 ```bash
 python -u main.py --dataset cifar10 --model cifar10_resnet --job-dir ./cifar10
